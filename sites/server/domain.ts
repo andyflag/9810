@@ -23,7 +23,33 @@ export class RuleError extends Error {
 }
 export const D = (v: any = 0) => new Decimal(v || 0);
 export const money = (v: any) => D(v).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
-export const total = (rows: Row[], key: string) => rows.reduce((s, r) => s.plus(D(r[key])), D(0));
+export const total = (rows: Row[], key: string) =>
+  rows.reduce<Decimal>((s, r) => s.plus(D(r[key])), D(0));
+/** Allocate rounded cents by largest remainder, including signed refund rows.
+ * A separate denominator preserves partially allocated settlement totals. */
+export function allocateMoney(amount: any, weights: any[], denominator?: any): number[] {
+  const divisor =
+    denominator === undefined
+      ? weights.reduce<Decimal>((sum, value) => sum.plus(D(value)), D(0))
+      : D(denominator);
+  if (!weights.length || divisor.lte(0)) return weights.map(() => 0);
+  const numerators = weights.map((value) => D(amount).mul(100).mul(D(value)));
+  const cents = numerators.map((value) => value.div(divisor).floor());
+  const numeratorTotal = numerators.reduce((sum, value) => sum.plus(value), D(0));
+  let target = numeratorTotal.divToInt(divisor);
+  const remainder = numeratorTotal.minus(target.mul(divisor));
+  if (remainder.abs().mul(2).gte(divisor))
+    target = target.plus(numeratorTotal.isNegative() ? -1 : 1);
+  const remaining = target.minus(cents.reduce((sum, value) => sum.plus(value), D(0))).toNumber();
+  const order = numerators
+    .map((value, index) => ({
+      index,
+      remainder: value.minus(cents[index].mul(divisor)),
+    }))
+    .sort((a, b) => b.remainder.cmp(a.remainder) || a.index - b.index);
+  for (let i = 0; i < remaining; i++) cents[order[i].index] = cents[order[i].index].plus(1);
+  return cents.map((value) => (value.isZero() ? 0 : value.div(100).toNumber()));
+}
 export const present = (v: any) => v !== null && v !== undefined && v !== '';
 export const todayCN = () =>
   new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
@@ -147,6 +173,15 @@ export function cleanSettings(payload: Row) {
   if (!validDate(deadline('2026-01-01', s)!)) throw new RuleError('截止日必须是每年都存在的日期');
   return s;
 }
+function groupRows(rows: Row[], key: string): Map<string, Row[]> {
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    const group = groups.get(row[key]);
+    if (group) group.push(row);
+    else groups.set(row[key], [row]);
+  }
+  return groups;
+}
 export function compute(
   input: Record<string, Row[]>,
   settings: Row = DEFAULT_SETTINGS,
@@ -157,10 +192,16 @@ export function compute(
     string,
     Row[]
   >;
-  const skuIndex = Object.fromEntries(data.skus.map((r) => [r.sku, r]));
-  const exports: Record<string, Row> = {};
+  const skuIndex = new Map(data.skus.map((r) => [r.sku, r]));
+  const salesByLedger = groupRows(data.sales, 'ledger_id');
+  const salesBySettlement = groupRows(data.sales, 'settlement_id');
+  const taxesByLedger = groupRows(data.taxes, 'ledger_id');
+  const exceptionsByLedger = groupRows(data.exceptions, 'ledger_id');
+  const documentsByDeclaration = new Map(data.documents.map((r) => [r.declaration_no, r]));
+  const receiptsBySettlement = new Map(data.receipts.map((r) => [r.settlement_id, r]));
+  const exports: Record<string, Row> = Object.create(null);
   for (const r of data.exports) {
-    const sku = skuIndex[r.sku] || {};
+    const sku = skuIndex.get(r.sku) || {};
     Object.assign(r, {
       ledger_id: `${r.declaration_no}-${r.item_no}`,
       name: sku.name ?? 'SKU未建档',
@@ -202,7 +243,7 @@ export function compute(
         ),
       ),
     );
-    const related = data.sales.filter((t) => t.settlement_id === r.settlement_id);
+    const related = salesBySettlement.get(r.settlement_id) || [];
     r.allocated = money(total(related, 'net_amount'));
     r.allocation_difference = money(D(r.net_amount).minus(D(r.allocated)));
     r.converted_amount =
@@ -214,37 +255,29 @@ export function compute(
       : D(0);
     const denominator = Decimal.max(D(r.net_amount), D(r.allocated));
     const ratio = denominator.gt(0) ? received.div(denominator) : D(0);
-    const allocations = related.map((t) => money(D(t.net_amount).mul(ratio)));
-    if (allocations.length) {
-      const target = money(D(r.allocated).mul(ratio));
-      const index = allocations.length - 1;
-      allocations[index] = money(
-        D(allocations[index])
-          .plus(D(target))
-          .minus(allocations.reduce((a, v) => a.plus(D(v)), D(0))),
-      );
-    }
+    const allocations = allocateMoney(
+      received,
+      related.map((t) => t.net_amount),
+      denominator,
+    );
     related.forEach((t, i) => {
       t.received_allocated = allocations[i];
       t.receipt_status = ratio.gte(1) ? '已收汇' : ratio.gt(0) ? '部分收汇' : '待收汇';
     });
   }
-  const taxRemaining: Record<string, Decimal> = {};
+  const taxRemaining: Record<string, Decimal> = Object.create(null);
+  const negativeNormalQuantities = new Map<string, Decimal>();
   for (const id of Object.keys(exports)) {
-    const sold = total(
-      data.sales.filter((r) => r.ledger_id === id),
-      'net_qty',
-    );
+    const sold = total(salesByLedger.get(id) || [], 'net_qty');
     const normal = total(
-      data.taxes.filter((r) => r.ledger_id === id && r.method === NORMAL),
+      (taxesByLedger.get(id) || []).filter((r) => r.method === NORMAL),
       'quantity',
     );
-    taxRemaining[id] = Decimal.max(0, sold.minus(normal));
+    taxRemaining[id] = Decimal.max(0, Decimal.min(sold, sold.minus(normal)));
+    if (normal.lt(0)) negativeNormalQuantities.set(id, normal);
   }
-  for (const r of [...data.taxes].sort(
-    (a, b) =>
-      a.declaration_date.localeCompare(b.declaration_date) ||
-      String(a.id || '').localeCompare(String(b.id || '')),
+  for (const r of [...data.taxes].sort((a, b) =>
+    a.declaration_date.localeCompare(b.declaration_date),
   )) {
     const e = exports[r.ledger_id] || {};
     r.sku = e.sku ?? null;
@@ -305,11 +338,11 @@ export function compute(
   }
   const ledger: Row[] = [];
   for (const e of data.exports) {
-    const ss = data.sales.filter((r) => r.ledger_id === e.ledger_id),
-      ts = data.taxes.filter((r) => r.ledger_id === e.ledger_id),
+    const ss = salesByLedger.get(e.ledger_id) || [],
+      ts = taxesByLedger.get(e.ledger_id) || [],
       ps = ts.filter((r) => r.method === PRE),
-      xs = data.exceptions.filter((r) => r.ledger_id === e.ledger_id),
-      ds = data.documents.find((r) => r.declaration_no === e.declaration_no);
+      xs = exceptionsByLedger.get(e.ledger_id) || [],
+      ds = documentsByDeclaration.get(e.declaration_no);
     const r: Row = {
       ...e,
       net_sold: total(ss, 'net_qty').toNumber(),
@@ -354,8 +387,17 @@ export function compute(
     if (ss.some((t) => ['超期', '已超期未留存'].includes(t.evidence_status)))
       add('warning', '销售佐证超期');
     if (xs.some((t) => t.tax_adjustment === '待处理')) add('warning', '异常退税待处理');
+    const negativeNormal = negativeNormalQuantities.get(e.ledger_id);
+    if (negativeNormal)
+      add(
+        'warning',
+        `正常申报累计数量为 ${negativeNormal.toFixed()} 件，请核对冲减记录；预退税可分配销量按实际净销量 ${r.net_sold} 件封顶`,
+      );
     const ids = new Set(ss.map((t) => t.settlement_id)),
-      linked = data.receipts.filter((t) => ids.has(t.settlement_id));
+      linked = [...ids].flatMap((id) => {
+        const receipt = receiptsBySettlement.get(id);
+        return receipt ? [receipt] : [];
+      });
     if (linked.some((t) => t.allocation_difference !== 0)) add('warning', '结算分摊差异');
     if (linked.length !== ids.size) add('warning', '结算报告未登记');
     if (linked.some((t) => D(t.received_amount).gt(D(t.net_amount))))
@@ -364,8 +406,9 @@ export function compute(
     ledger.push(r);
   }
   const currencies: Row = {};
-  for (const c of [...new Set(ledger.map((r) => r.currency))].sort()) {
-    const group = ledger.filter((r) => r.currency === c);
+  const byCurrency = groupRows(ledger, 'currency');
+  for (const c of [...byCurrency.keys()].sort()) {
+    const group = byCurrency.get(c)!;
     currencies[c] = {
       net_revenue: money(total(group, 'net_revenue')),
       received: money(total(group, 'received_amount')),
@@ -413,11 +456,11 @@ export function validateState(data: Record<string, Row[]>, settings: Row) {
     if (!skus.has(e.sku)) throw new RuleError(`请先建立 SKU 档案：${e.sku}`);
   for (const kind of ['sales', 'taxes', 'exceptions'])
     for (const r of data[kind]) {
-      const e = exportMap[r.ledger_id];
+      const e = Object.hasOwn(exportMap, r.ledger_id) ? exportMap[r.ledger_id] : undefined;
       if (!e) throw new RuleError(`${SCHEMA[kind].label}引用的核销编号不存在：${r.ledger_id}`);
       if (kind === 'sales') {
         if (r.sku !== e.sku) throw new RuleError('销售 SKU 与报关 SKU 不符');
-        const p = receipts[r.settlement_id];
+        const p = Object.hasOwn(receipts, r.settlement_id) ? receipts[r.settlement_id] : undefined;
         if (p && p.currency !== e.currency)
           throw new RuleError('同一结算报告与所属报关单的币种必须一致');
         if (r.site && e.site && r.site !== e.site) throw new RuleError('销售站点与报关站点不符');

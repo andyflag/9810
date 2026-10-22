@@ -1,0 +1,31 @@
+{
+  "records": 6001,
+  "bytes": 896165,
+  "median_ms": 105.8,
+  "samples": [
+    102.45,
+    102.53,
+    102.94,
+    105.8,
+    106.27,
+    106.46,
+    111.85
+  ],
+  "stats": {
+    "export_count": 1000,
+    "quantity": 100000,
+    "net_sold": 30000,
+    "remaining": 70000,
+    "declared_tax": 91000,
+    "prepaid_tax": 91000,
+    "pending_tax": 1000,
+    "risk_count": 1000,
+    "currencies": {
+      "USD": {
+        "net_revenue": 30000,
+        "received": 15000,
+        "pending": 15000
+      }
+    }
+  }
+}

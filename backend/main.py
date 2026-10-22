@@ -1,12 +1,17 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from io import BytesIO
-from datetime import datetime, timezone
+from datetime import datetime
 from urllib.parse import quote
-import json, os, secrets, sqlite3, time
+import json
+import os
+import secrets
+import sqlite3
+import time
+import re
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import MutableHeaders
 from pydantic import BaseModel, Field
 from . import db, auth, excel
 from .domain import (
@@ -18,9 +23,7 @@ from .domain import (
     clean_settings,
     compute,
     validate_state,
-    dec,
-    money,
-    PRE,
+    allocate_money,
 )
 
 
@@ -39,27 +42,66 @@ app = FastAPI(
     openapi_url="/api/openapi.json" if os.getenv("APP_ENV") != "production" else None,
 )
 
+MAX_REQUEST_BYTES = 12 * 1024 * 1024
 
-@app.middleware("http")
-async def protect(request: Request, call_next):
-    if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
-        # A custom header cannot be sent cross-origin without CORS permission.
-        # This app never enables cross-origin credentials or permissive CORS.
-        if request.headers.get("X-Requested-With") != "9810":
-            return JSONResponse({"detail": "无效的请求来源，请从应用内重试"}, 403)
-        if int(request.headers.get("content-length", "0") or 0) > 12 * 1024 * 1024:
-            return JSONResponse({"detail": "请求不得超过 12 MB"}, 413)
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "same-origin"
-    if request.url.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-store"
-    else:
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-        )
-    return response
+
+class RequestSizeLimitMiddleware:
+    """Protect requests without buffering bodies or wrapping receive exceptions."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def protected_send(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["X-Frame-Options"] = "DENY"
+                headers["Referrer-Policy"] = "same-origin"
+                if scope["path"].startswith("/api/"):
+                    headers["Cache-Control"] = "no-store"
+                else:
+                    headers["Content-Security-Policy"] = (
+                        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                        "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+                        "base-uri 'self'; frame-ancestors 'none'"
+                    )
+            await send(message)
+
+        lengths = [value for key, value in scope["headers"] if key.lower() == b"content-length"]
+        if lengths and (
+            any(not re.fullmatch(rb"[0-9]{1,20}", value) for value in lengths)
+            or len(set(lengths)) != 1
+        ):
+            response = JSONResponse({"detail": "Content-Length 格式无效"}, 400)
+            return await response(scope, receive, protected_send)
+        if lengths and int(lengths[0]) > MAX_REQUEST_BYTES:
+            response = JSONResponse({"detail": "请求不得超过 12 MB"}, 413)
+            return await response(scope, receive, protected_send)
+        if scope["method"] in ("POST", "PUT", "PATCH", "DELETE"):
+            request_headers = {key.lower(): value for key, value in scope["headers"]}
+            # Browsers cannot send this cross-origin without CORS permission.
+            if request_headers.get(b"x-requested-with") != b"9810":
+                response = JSONResponse({"detail": "无效的请求来源，请从应用内重试"}, 403)
+                return await response(scope, receive, protected_send)
+        received = 0
+
+        async def bounded_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_REQUEST_BYTES:
+                    raise HTTPException(413, "请求不得超过 12 MB")
+            return message
+
+        await self.app(scope, bounded_receive, protected_send)
+
+
+app.add_middleware(RequestSizeLimitMiddleware)
 
 
 @app.exception_handler(RuleError)
@@ -139,29 +181,31 @@ def register(body: Account, request: Request, response: Response):
             auth.new_session(con, response, user_id, tenant_id)
     except sqlite3.IntegrityError:
         raise HTTPException(409, "该邮箱已注册，请登录") from None
-    return {"ok": True}
+    return {"ok": True, "tenant_id": tenant_id}
 
 
 @app.post("/api/auth/login")
 def login(body: Account, request: Request, response: Response):
     account = auth.email(body.email)
     auth.rate_limit(request, account)
-    auth.rate_limit(request, "all-logins")
+    # A shared office IP can serve many accounts; keep the per-account cap tight.
+    auth.rate_limit(request, "all-logins", limit=200)
     with db.connect(write=True) as con:
         user = con.execute("SELECT * FROM users WHERE email=?", (account,)).fetchone()
         stored = user["password_hash"] if user else "00" * 16 + ":" + "00" * 64
         if not auth.verify(body.password, stored) or not user:
             raise HTTPException(401, "邮箱或密码不正确")
         tenant = con.execute(
-            "SELECT tenant_id FROM memberships WHERE user_id=? ORDER BY role LIMIT 1", (user["id"],)
+            "SELECT tenant_id FROM memberships WHERE user_id=? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,tenant_id LIMIT 1",
+            (user["id"],),
         ).fetchone()
         auth.new_session(con, response, user["id"], tenant["tenant_id"])
-    return {"ok": True}
+    return {"ok": True, "tenant_id": tenant["tenant_id"]}
 
 
 @app.post("/api/auth/logout")
 def logout(response: Response, ctx=Depends(auth.context)):
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx, identity=True) as con:
         con.execute("DELETE FROM sessions WHERE token_hash=?", (ctx["token_hash"],))
     response.delete_cookie(auth.COOKIE, path="/")
     return {"ok": True}
@@ -171,6 +215,7 @@ def logout(response: Response, ctx=Depends(auth.context)):
 def state(ctx=Depends(auth.context)):
     with db.connect() as con:
         con.execute("BEGIN")
+        auth.recheck(con, ctx)
         settings = db.settings(con, ctx["tenant_id"])
         result = compute(db.dataset(con, ctx["tenant_id"]), settings)
         tenant = con.execute(
@@ -209,7 +254,7 @@ def state(ctx=Depends(auth.context)):
 
 @app.post("/api/workspaces/switch")
 def switch(body: SwitchInput, ctx=Depends(auth.context)):
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx, identity=True) as con:
         if not con.execute(
             "SELECT 1 FROM memberships WHERE tenant_id=? AND user_id=?",
             (body.tenant_id, ctx["user_id"]),
@@ -219,12 +264,14 @@ def switch(body: SwitchInput, ctx=Depends(auth.context)):
             "UPDATE sessions SET tenant_id=? WHERE token_hash=?",
             (body.tenant_id, ctx["token_hash"]),
         )
-    return {"ok": True}
+    return {"ok": True, "tenant_id": body.tenant_id}
 
 
 @app.get("/api/team")
 def team(ctx=Depends(auth.owner_context)):
     with db.connect() as con:
+        con.execute("BEGIN")
+        auth.recheck(con, ctx, "owner")
         members = [
             dict(r)
             for r in con.execute(
@@ -241,7 +288,12 @@ def invite(body: InviteInput, ctx=Depends(auth.owner_context)):
     if body.role not in ["editor", "viewer"]:
         raise HTTPException(422, "邀请角色必须为编辑或只读")
     token = secrets.token_urlsafe(32)
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx, required="owner") as con:
+        if con.execute(
+            "SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=? AND u.email=?",
+            (ctx["tenant_id"], email),
+        ).fetchone():
+            raise HTTPException(409, "该邮箱已是企业成员，无需重复邀请")
         con.execute(
             "DELETE FROM invitations WHERE tenant_id=? AND email=? AND used_at IS NULL",
             (ctx["tenant_id"], email),
@@ -256,7 +308,7 @@ def invite(body: InviteInput, ctx=Depends(auth.owner_context)):
 
 @app.post("/api/invitations/accept")
 def accept(body: TokenInput, ctx=Depends(auth.context)):
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx, identity=True) as con:
         row = con.execute(
             "SELECT * FROM invitations WHERE token_hash=? AND used_at IS NULL AND expires_at>?",
             (auth.digest(body.token), int(time.time())),
@@ -278,14 +330,14 @@ def accept(body: TokenInput, ctx=Depends(auth.context)):
             (row["tenant_id"], ctx["token_hash"]),
         )
         db.audit(con, {**ctx, "tenant_id": row["tenant_id"]}, "加入企业", ctx["email"])
-    return {"ok": True}
+    return {"ok": True, "tenant_id": row["tenant_id"]}
 
 
 @app.delete("/api/team/{user_id}")
 def remove_member(user_id: str, ctx=Depends(auth.owner_context)):
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx, required="owner") as con:
         row = con.execute(
-            "SELECT role FROM memberships WHERE tenant_id=? AND user_id=?",
+            "SELECT m.role,u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=? AND m.user_id=?",
             (ctx["tenant_id"], user_id),
         ).fetchone()
         if not row:
@@ -296,8 +348,22 @@ def remove_member(user_id: str, ctx=Depends(auth.owner_context)):
             "DELETE FROM memberships WHERE tenant_id=? AND user_id=?", (ctx["tenant_id"], user_id)
         )
         con.execute(
-            "DELETE FROM sessions WHERE tenant_id=? AND user_id=?", (ctx["tenant_id"], user_id)
+            "DELETE FROM invitations WHERE tenant_id=? AND email=? AND used_at IS NULL",
+            (ctx["tenant_id"], row["email"]),
         )
+        fallback = con.execute(
+            "SELECT tenant_id FROM memberships WHERE user_id=? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,tenant_id LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if fallback:
+            con.execute(
+                "UPDATE sessions SET tenant_id=? WHERE tenant_id=? AND user_id=?",
+                (fallback["tenant_id"], ctx["tenant_id"], user_id),
+            )
+        else:
+            con.execute(
+                "DELETE FROM sessions WHERE tenant_id=? AND user_id=?", (ctx["tenant_id"], user_id)
+            )
         db.audit(con, ctx, "移除成员", user_id)
     return {"ok": True}
 
@@ -326,7 +392,7 @@ def insert_record(con, ctx, kind, data):
 @app.post("/api/records/{kind}")
 def create_record(kind: str, body: RecordInput, ctx=Depends(auth.write_context)):
     data = clean(kind, body.data)
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx) as con:
         records = db.dataset(con, ctx["tenant_id"])
         records[kind].append(data)
         validate_state(records, db.settings(con, ctx["tenant_id"]))
@@ -338,7 +404,7 @@ def create_record(kind: str, body: RecordInput, ctx=Depends(auth.write_context))
 @app.put("/api/records/{kind}/{record_id}")
 def update_record(kind: str, record_id: str, body: RecordInput, ctx=Depends(auth.write_context)):
     data = clean(kind, body.data)
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx) as con:
         old = get_record(con, ctx, kind, record_id)
         if body.version != old["version"]:
             raise HTTPException(409, "记录已被其他成员修改，请刷新后重新编辑")
@@ -362,7 +428,7 @@ def update_record(kind: str, record_id: str, body: RecordInput, ctx=Depends(auth
 
 @app.delete("/api/records/{kind}/{record_id}")
 def delete_record(kind: str, record_id: str, version: int, ctx=Depends(auth.write_context)):
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx) as con:
         old = get_record(con, ctx, kind, record_id)
         if version != old["version"]:
             raise HTTPException(409, "记录已更新，请刷新后重试")
@@ -377,7 +443,7 @@ def delete_record(kind: str, record_id: str, version: int, ctx=Depends(auth.writ
 @app.put("/api/settings")
 def save_settings(body: RecordInput, ctx=Depends(auth.owner_context)):
     settings = clean_settings(body.data)
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx, required="owner") as con:
         revision = con.execute(
             "SELECT revision FROM tenants WHERE id=?", (ctx["tenant_id"],)
         ).fetchone()[0]
@@ -396,6 +462,8 @@ def save_settings(body: RecordInput, ctx=Depends(auth.owner_context)):
 @app.get("/api/audit")
 def audit_log(ctx=Depends(auth.owner_context)):
     with db.connect() as con:
+        con.execute("BEGIN")
+        auth.recheck(con, ctx, "owner")
         return [
             dict(r)
             for r in con.execute(
@@ -408,7 +476,7 @@ def audit_log(ctx=Depends(auth.owner_context)):
 @app.post("/api/demo")
 def demo(ctx=Depends(auth.write_context)):
     sample = json.loads((Path(__file__).parent / "sample.json").read_text())
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx) as con:
         if con.execute("SELECT 1 FROM records WHERE tenant_id=?", (ctx["tenant_id"],)).fetchone():
             raise HTTPException(409, "只能在空企业中载入示例，现有数据不会被覆盖")
         sample = {k: [clean(k, r) for r in sample[k]] for k in ORDER}
@@ -425,6 +493,7 @@ def fifo(body: FifoInput, ctx=Depends(auth.write_context)):
     with db.connect(write=body.commit) as con:
         if not body.commit:
             con.execute("BEGIN")
+        auth.recheck(con, ctx, "write")
         revision = con.execute(
             "SELECT revision FROM tenants WHERE id=?", (ctx["tenant_id"],)
         ).fetchone()[0]
@@ -455,11 +524,6 @@ def fifo(body: FifoInput, ctx=Depends(auth.write_context)):
             qty = min(remaining, lot["remaining"])
             if not qty:
                 break
-            try:
-                gross = money(dec(body.gross) * dec(qty) / dec(body.quantity))
-                fees = money(dec(body.fees) * dec(qty) / dec(body.quantity))
-            except Exception:
-                raise RuleError("销售金额或费用格式不正确") from None
             result.append(
                 {
                     "month": body.month,
@@ -468,8 +532,8 @@ def fifo(body: FifoInput, ctx=Depends(auth.write_context)):
                     "ledger_id": lot["ledger_id"],
                     "sold_qty": qty,
                     "returned_qty": 0,
-                    "gross": gross,
-                    "fees": fees,
+                    "gross": 0,
+                    "fees": 0,
                     "site": lot.get("site"),
                     "sale_date": body.sale_date,
                     "evidence_date": body.evidence_date,
@@ -479,10 +543,13 @@ def fifo(body: FifoInput, ctx=Depends(auth.write_context)):
             remaining -= qty
         if remaining:
             raise RuleError(f"可用库存不足，还差 {remaining} 件；请核对 SKU、站点和币种")
-        for field in ["gross", "fees"]:
-            result[-1][field] = money(
-                dec(getattr(body, field)) - sum((dec(r[field]) for r in result[:-1]), dec(0))
-            )
+        try:
+            weights = [r["sold_qty"] for r in result]
+            for field in ["gross", "fees"]:
+                for row, allocated in zip(result, allocate_money(getattr(body, field), weights)):
+                    row[field] = allocated
+        except Exception:
+            raise RuleError("销售金额或费用格式不正确") from None
         result = [clean("sales", r) for r in result]
         data["sales"].extend(result)
         validate_state(data, settings)
@@ -501,6 +568,7 @@ async def import_workbook(
     with db.connect(write=not dry_run) as con:
         if dry_run:
             con.execute("BEGIN")
+        auth.recheck(con, ctx, "write")
         current = db.dataset(con, ctx["tenant_id"])
         combined, new, skipped = excel.merge(current, incoming)
         validate_state(combined, db.settings(con, ctx["tenant_id"]))
@@ -524,11 +592,15 @@ async def import_workbook(
 
 @app.get("/api/export")
 def export_workbook(ctx=Depends(auth.context)):
-    with db.connect(write=True) as con:
-        content = excel.export(
-            db.dataset(con, ctx["tenant_id"]), db.settings(con, ctx["tenant_id"])
-        )
-        db.audit(con, ctx, "导出台账", "workbook")
+    with db.connect() as con:
+        con.execute("BEGIN")
+        auth.recheck(con, ctx)
+        data = db.dataset(con, ctx["tenant_id"])
+        settings = db.settings(con, ctx["tenant_id"])
+    # Workbook rendering must not hold SQLite's global writer lock.
+    content = excel.export(data, settings)
+    with auth.transaction(ctx, required="read") as con:
+        db.audit(con, ctx, "导出台账", "workbook", change_revision=False)
     filename = quote("9810核销台账-" + datetime.now().strftime("%Y%m%d") + ".xlsx")
     return Response(
         content,
@@ -567,7 +639,7 @@ async def upload_file(
     if not mime:
         raise HTTPException(422, "支持 PDF、PNG、JPG、XLSX、DOCX、TXT 和 CSV 附件")
     file_id = auth.uid()
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx) as con:
         get_record(con, ctx, "documents", record_id)
         used = con.execute(
             "SELECT COALESCE(SUM(size),0) FROM files WHERE tenant_id=?", (ctx["tenant_id"],)
@@ -591,6 +663,8 @@ async def upload_file(
 @app.get("/api/files/{file_id}")
 def download_file(file_id: str, ctx=Depends(auth.context)):
     with db.connect() as con:
+        con.execute("BEGIN")
+        auth.recheck(con, ctx)
         row = con.execute(
             "SELECT * FROM files WHERE tenant_id=? AND id=?", (ctx["tenant_id"], file_id)
         ).fetchone()
@@ -605,7 +679,7 @@ def download_file(file_id: str, ctx=Depends(auth.context)):
 
 @app.delete("/api/files/{file_id}")
 def remove_file(file_id: str, ctx=Depends(auth.write_context)):
-    with db.connect(write=True) as con:
+    with auth.transaction(ctx) as con:
         row = con.execute(
             "SELECT name,record_id FROM files WHERE tenant_id=? AND id=?",
             (ctx["tenant_id"], file_id),

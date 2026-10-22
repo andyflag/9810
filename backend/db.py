@@ -1,5 +1,7 @@
 from contextlib import contextmanager
-import json, os, sqlite3
+import json
+import os
+import sqlite3
 from pathlib import Path
 from .domain import ORDER, DEFAULT_SETTINGS
 
@@ -39,9 +41,12 @@ def initialize():
         CREATE TABLE IF NOT EXISTS memberships (
           tenant_id TEXT REFERENCES tenants(id), user_id TEXT REFERENCES users(id),
           role TEXT NOT NULL CHECK(role IN ('owner','editor','viewer')), PRIMARY KEY(tenant_id,user_id));
+        CREATE INDEX IF NOT EXISTS memberships_user ON memberships(user_id,tenant_id);
         CREATE TABLE IF NOT EXISTS sessions (
           token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
           tenant_id TEXT NOT NULL REFERENCES tenants(id), expires_at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS sessions_tenant_user ON sessions(tenant_id,user_id);
+        CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
         CREATE TABLE IF NOT EXISTS records (
           id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id),
           kind TEXT NOT NULL, payload TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
@@ -55,13 +60,17 @@ def initialize():
         CREATE TABLE IF NOT EXISTS invitations (
           token_hash TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id),
           email TEXT NOT NULL, role TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at TEXT);
+        CREATE INDEX IF NOT EXISTS invitations_tenant_email ON invitations(tenant_id,email);
         CREATE TABLE IF NOT EXISTS files (
           id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id),
           record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
           name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, content BLOB NOT NULL,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        CREATE INDEX IF NOT EXISTS files_tenant ON files(tenant_id);
+        CREATE INDEX IF NOT EXISTS files_record ON files(record_id);
         CREATE TABLE IF NOT EXISTS login_attempts (
           key TEXT PRIMARY KEY, count INTEGER NOT NULL, window_start INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS login_attempts_window ON login_attempts(window_start);
         PRAGMA user_version = 1;
         """)
 
@@ -86,7 +95,7 @@ def settings(con, tenant_id):
     }
 
 
-def audit(con, ctx, action, target, before=None, after=None):
+def audit(con, ctx, action, target, before=None, after=None, change_revision=True):
     con.execute(
         "INSERT INTO audit(tenant_id,user_id,action,target,before_json,after_json) VALUES (?,?,?,?,?,?)",
         (
@@ -98,4 +107,5 @@ def audit(con, ctx, action, target, before=None, after=None):
             json.dumps(after, ensure_ascii=False) if after is not None else None,
         ),
     )
-    con.execute("UPDATE tenants SET revision=revision+1 WHERE id=?", (ctx["tenant_id"],))
+    if change_revision:
+        con.execute("UPDATE tenants SET revision=revision+1 WHERE id=?", (ctx["tenant_id"],))

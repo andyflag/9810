@@ -1,4 +1,7 @@
 import { DEFAULT_SETTINGS, emptyData, validateState, RuleError, type Row } from './domain';
+import { requestedWorkspace } from './request';
+import { HttpError } from './errors';
+export { HttpError } from './errors';
 export type Env = { DB: D1Database; BUCKET: R2Bucket };
 export type Identity = { id: string; email: string; name: string };
 export type Context = {
@@ -10,14 +13,6 @@ export type Context = {
   files: Row[];
   role: string;
 };
-export class HttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 export const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 export const uuid = () => crypto.randomUUID();
 export async function hash(value: string) {
@@ -36,9 +31,15 @@ export function identity(request: Request): Identity {
     } catch {}
   return { id, email: email.toLowerCase(), name };
 }
-export async function context(request: Request, env: Env): Promise<Context> {
+export async function context(
+  request: Request,
+  env: Env,
+  options: { allowDefault?: boolean; ignoreWorkspace?: boolean } = {},
+): Promise<Context> {
   const user = identity(request);
   if (!env.DB || !env.BUCKET) throw new HttpError(503, '云端存储正在初始化，请稍后重试');
+  const selected = options.ignoreWorkspace ? null : requestedWorkspace(request);
+  if (!selected && !options.allowDefault) throw new HttpError(400, '请明确选择企业后重试');
   const id = 'w_' + (await hash(user.id)).slice(0, 32),
     db = env.DB;
   const pref = await db
@@ -68,7 +69,7 @@ export async function context(request: Request, env: Env): Promise<Context> {
         .bind(user.id, id),
     ]);
   }
-  const active = pref?.workspace_id || id;
+  const active = selected || pref?.workspace_id || id;
   const row = await db
     .prepare(
       'SELECT w.*,m.role FROM workspaces w JOIN memberships m ON m.workspace_id=w.id WHERE w.id=? AND m.user_id=?',
@@ -76,6 +77,7 @@ export async function context(request: Request, env: Env): Promise<Context> {
     .bind(active, user.id)
     .first<Row>();
   if (!row) {
+    if (selected) throw new HttpError(403, '无权访问该企业，权限可能已被撤销');
     await db
       .prepare('UPDATE preferences SET workspace_id=? WHERE user_id=?')
       .bind(id, user.id)
@@ -110,10 +112,34 @@ export async function context(request: Request, env: Env): Promise<Context> {
   };
 }
 export function requireWrite(ctx: Context) {
-  if (ctx.role === 'viewer') throw new HttpError(403, '只读成员不能修改数据');
+  if (!['owner', 'editor'].includes(ctx.role)) throw new HttpError(403, '只读成员不能修改数据');
 }
 export function requireOwner(ctx: Context) {
   if (ctx.role !== 'owner') throw new HttpError(403, '只有管理员可以执行此操作');
+}
+export function auditStatement(
+  ctx: Context,
+  action: string,
+  target: string,
+  before: any = null,
+  after: any = null,
+  mutation: string | null = null,
+) {
+  return ctx.env.DB.prepare(
+    'INSERT INTO audit(id,workspace_id,user_id,name,action,target,before_json,after_json,created_at) SELECT ?,?,?,?,?,?,?,?,?' +
+      (mutation ? ' WHERE EXISTS(SELECT 1 FROM workspaces WHERE id=? AND mutation_id=?)' : ''),
+  ).bind(
+    uuid(),
+    ctx.workspace.id,
+    ctx.user.id,
+    ctx.user.name,
+    action,
+    target,
+    before === null ? null : JSON.stringify(before),
+    after === null ? null : JSON.stringify(after),
+    now(),
+    ...(mutation ? [ctx.workspace.id, mutation] : []),
+  );
 }
 export async function audit(
   ctx: Context,
@@ -122,21 +148,7 @@ export async function audit(
   before: any = null,
   after: any = null,
 ) {
-  await ctx.env.DB.prepare(
-    'INSERT INTO audit(id,workspace_id,user_id,name,action,target,before_json,after_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
-  )
-    .bind(
-      uuid(),
-      ctx.workspace.id,
-      ctx.user.id,
-      ctx.user.name,
-      action,
-      target,
-      before === null ? null : JSON.stringify(before),
-      after === null ? null : JSON.stringify(after),
-      now(),
-    )
-    .run();
+  await auditStatement(ctx, action, target, before, after).run();
 }
 export async function save(
   ctx: Context,
@@ -147,8 +159,10 @@ export async function save(
   after: any = null,
   settings = ctx.settings,
   files = ctx.files,
+  ownerOnly = false,
 ) {
   requireWrite(ctx);
+  if (ownerOnly) requireOwner(ctx);
   validateState(records, settings);
   const data = JSON.stringify({ records, files });
   if (new TextEncoder().encode(data).length > 1500000)
@@ -160,7 +174,7 @@ export async function save(
   const results = await db.batch([
     db
       .prepare(
-        "UPDATE workspaces SET data=?,settings=?,name=?,revision=revision+1,mutation_id=?,updated_at=? WHERE id=? AND revision=? AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=? AND role IN ('owner','editor'))",
+        "UPDATE workspaces SET data=?,settings=?,name=?,revision=revision+1,mutation_id=?,updated_at=? WHERE id=? AND revision=? AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=? AND role IN ('owner','editor') AND (?=0 OR role='owner'))",
       )
       .bind(
         data,
@@ -172,6 +186,7 @@ export async function save(
         ctx.workspace.revision,
         ctx.workspace.id,
         ctx.user.id,
+        ownerOnly ? 1 : 0,
       ),
     db
       .prepare(

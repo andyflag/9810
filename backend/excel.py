@@ -2,10 +2,11 @@
 
 from datetime import date, datetime
 from io import BytesIO
-import json, zipfile
+import json
+import zipfile
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
-from .domain import SCHEMA, ORDER, RuleError, clean, DEFAULT_SETTINGS, compute
+from .domain import SCHEMA, ORDER, RuleError, clean, compute, dec
 
 MAX_XLSX = 10 * 1024 * 1024
 
@@ -41,17 +42,22 @@ def parse(content):
                 raise RuleError("工作表列数超出模板范围")
             header = spec["header_row"]
             headers = next(sheet.iter_rows(min_row=header, max_row=header, values_only=True), ())
-            normalize = lambda s: str(s or "").replace("（自动）", "").strip()
-            # Ignore new optional columns absent from the original workbook.
-            bad = [
-                f["label"]
-                for f in spec["fields"]
-                if f["required"]
-                and (
-                    len(headers) < f["column"]
-                    or normalize(headers[f["column"] - 1]) != normalize(f["label"])
-                )
-            ]
+            def normalize(value):
+                return str(value or "").replace("（自动）", "").strip()
+            # Validate every hand-filled column, while accepting optional app
+            # extensions that are absent from the end of the original template.
+            last_header = max((i + 1 for i, value in enumerate(headers) if normalize(value)), default=0)
+            bad, absent_columns = [], set()
+            for f in spec["fields"]:
+                if f["computed"]:
+                    continue
+                value = normalize(headers[f["column"] - 1]) if len(headers) >= f["column"] else ""
+                if value == normalize(f["label"]):
+                    continue
+                if not f["required"] and not value and f["column"] > last_header:
+                    absent_columns.add(f["key"])
+                else:
+                    bad.append(f["label"])
             if bad:
                 raise RuleError(f"{spec['sheet']} 表头不匹配：{'、'.join(bad)}")
             for rowno, row in enumerate(
@@ -65,6 +71,8 @@ def parse(content):
                     cell = row[f["column"] - 1]
                     if f["computed"] or cell.value is None:
                         continue
+                    if f["key"] in absent_columns:
+                        raise RuleError(f"{spec['sheet']} 表头不匹配：{f['label']}")
                     # Original blank rows carry formulas; never evaluate uploaded formulas.
                     if cell.data_type == "f":
                         raise RuleError(f"{spec['sheet']} 第 {rowno} 行：手填列不能包含公式")
@@ -212,7 +220,9 @@ def export(data, settings):
                 value = r.get(f["key"])
                 cell = s.cell(i, f["column"])
                 if value is not None and f["type"] in ("number", "integer"):
-                    value = float(value)
+                    number = dec(value)
+                    # Excel numeric cells preserve at most 15 significant digits.
+                    value = format(number, "f") if len(number.normalize().as_tuple().digits) > 15 else float(number)
                 if value and f["type"] == "date":
                     value = date.fromisoformat(value)
                 safe_cell(cell, value)

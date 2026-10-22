@@ -1,0 +1,10 @@
+{
+  "workspace_admin_state_cleared": true,
+  "pagination_and_precision": true,
+  "tab_scope_and_download": true,
+  "busy_and_unsaved_guard": true,
+  "settings_navigation_guard": true,
+  "mobile_keyboard_focus_and_width": true,
+  "file_focus_visible": true,
+  "browser_errors": []
+}

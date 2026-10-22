@@ -1,0 +1,146 @@
+{
+  "text_samples": 2198,
+  "distinct_selector_color_background_font_size": 254,
+  "screens": [
+    "SKU 档案",
+    "SKU 档案表单",
+    "attention-hover",
+    "audit",
+    "computed-fields",
+    "delete-confirm",
+    "desktop-dashboard",
+    "desktop-dashboard-initial",
+    "detail",
+    "fifo",
+    "import",
+    "import-preview",
+    "login",
+    "mobile-dashboard",
+    "mobile-import",
+    "mobile-navigation",
+    "navigation-hover",
+    "new-workspace",
+    "settings",
+    "table-row-hover",
+    "team",
+    "出口报关",
+    "出口报关表单",
+    "单证留存",
+    "单证留存表单",
+    "回款收汇",
+    "回款收汇表单",
+    "库存异常",
+    "库存异常表单",
+    "退税核算",
+    "退税核算表单",
+    "销售核销",
+    "销售核销表单"
+  ],
+  "screen_count": 33,
+  "lowest_samples": [
+    {
+      "selector": "tbody > tr > td.computed-cell > span.badge.danger",
+      "text": "超期",
+      "color": "rgb(180, 79, 68)",
+      "background": [
+        252,
+        240,
+        237
+      ],
+      "ratio": 4.545,
+      "fontSize": "11px",
+      "screen": "销售核销"
+    },
+    {
+      "selector": "tbody > tr > td.computed-cell > span.badge.danger",
+      "text": "已超期未完成",
+      "color": "rgb(180, 79, 68)",
+      "background": [
+        252,
+        240,
+        237
+      ],
+      "ratio": 4.545,
+      "fontSize": "11px",
+      "screen": "单证留存"
+    },
+    {
+      "selector": "div.detail-body > div.detail-product > div > h3",
+      "text": "示例商品A",
+      "color": "rgb(91, 120, 84)",
+      "background": [
+        255,
+        255,
+        255
+      ],
+      "ratio": 4.93,
+      "fontSize": "16px",
+      "screen": "detail"
+    },
+    {
+      "selector": "div.table-toolbar > div.tabs > button > span",
+      "text": "2",
+      "color": "rgb(136, 93, 22)",
+      "background": [
+        245,
+        237,
+        223
+      ],
+      "ratio": 4.984,
+      "fontSize": "8px",
+      "screen": "desktop-dashboard-initial"
+    },
+    {
+      "selector": "div.table-toolbar > div.tabs > button > span",
+      "text": "2",
+      "color": "rgb(136, 93, 22)",
+      "background": [
+        245,
+        237,
+        223
+      ],
+      "ratio": 4.984,
+      "fontSize": "8px",
+      "screen": "desktop-dashboard"
+    },
+    {
+      "selector": "div.table-toolbar > div.tabs > button > span",
+      "text": "2",
+      "color": "rgb(136, 93, 22)",
+      "background": [
+        245,
+        237,
+        223
+      ],
+      "ratio": 4.984,
+      "fontSize": "8px",
+      "screen": "navigation-hover"
+    },
+    {
+      "selector": "div.table-toolbar > div.tabs > button > span",
+      "text": "2",
+      "color": "rgb(136, 93, 22)",
+      "background": [
+        245,
+        237,
+        223
+      ],
+      "ratio": 4.984,
+      "fontSize": "8px",
+      "screen": "table-row-hover"
+    },
+    {
+      "selector": "div.table-toolbar > div.tabs > button > span",
+      "text": "2",
+      "color": "rgb(136, 93, 22)",
+      "background": [
+        245,
+        237,
+        223
+      ],
+      "ratio": 4.984,
+      "fontSize": "8px",
+      "screen": "attention-hover"
+    }
+  ]
+}

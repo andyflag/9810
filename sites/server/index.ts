@@ -1,6 +1,7 @@
 import { api } from './api';
 import { HttpError, type Env } from './storage';
 import { RuleError } from './domain';
+import { boundedRequest } from './request';
 import assets from './assets.json';
 function asset(path: string) {
   const entry = (assets as Record<string, { content: string; type: string }>)[path];
@@ -25,8 +26,7 @@ export default {
           throw new HttpError(403, '无效的请求来源，请从应用内重试');
         const origin = request.headers.get('Origin');
         if (origin && origin !== url.origin) throw new HttpError(403, '无效的请求来源');
-        if (Number(request.headers.get('Content-Length') || 0) > 12 * 1024 * 1024)
-          throw new HttpError(413, '请求不得超过 12 MB');
+        request = await boundedRequest(request);
       }
       if (url.pathname.startsWith('/api/'))
         response = await api(request, env, () => {

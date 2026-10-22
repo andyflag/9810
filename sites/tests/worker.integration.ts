@@ -7,11 +7,14 @@ const suffix = crypto.randomUUID();
 const owner = 'owner-' + suffix,
   other = 'other-' + suffix,
   viewer = 'viewer-' + suffix;
+const workspaces = new Map<string, string>();
 async function request(user: string | null, path: string, method = 'GET', payload?: unknown) {
   const headers: Record<string, string> = { 'X-Requested-With': '9810' };
   if (user) {
     headers['oai-authenticated-user-id'] = user;
     headers['oai-authenticated-user-email'] = user + '@example.com';
+    const workspace = workspaces.get(user);
+    if (workspace) headers['X-Workspace-ID'] = workspace;
   }
   let body: BodyInit | undefined;
   if (payload instanceof FormData) body = payload;
@@ -24,7 +27,10 @@ async function request(user: string | null, path: string, method = 'GET', payloa
 async function ok(user: string, path: string, method = 'GET', payload?: unknown) {
   const r = await request(user, path, method, payload);
   assert.equal(r.status, 200, await r.clone().text());
-  return r.json() as Promise<any>;
+  const data = (await r.json()) as any;
+  const workspace = data.user?.tenant_id || data.tenant_id;
+  if (workspace) workspaces.set(user, workspace);
+  return data;
 }
 const state = (user: string) => ok(user, '/api/state');
 assert.equal((await request(null, '/api/state')).status, 401);
@@ -88,6 +94,8 @@ assert.equal(
   422,
 );
 await ok(owner, '/api/team/' + viewer, 'DELETE');
+assert.equal((await request(viewer, '/api/state')).status, 403);
+workspaces.delete(viewer);
 assert.equal((await state(viewer)).stats.export_count, 0);
 assert.equal((await request(viewer, '/api/files/' + file.id)).status, 404);
 console.log('PASS invitation email binding, viewer permissions and immediate revocation');
@@ -118,6 +126,7 @@ assert.equal((await state(owner)).records.sales.length, 3);
 console.log('PASS concurrent update lock and inventory/dependency guards');
 
 const importUser = 'import-' + suffix;
+await state(importUser);
 const sheet = new FormData();
 sheet.append('file', new File([readFileSync('template.xlsx')], 'template.xlsx'));
 assert.equal((await ok(importUser, '/api/import?dry_run=true', 'POST', sheet)).total, 13);

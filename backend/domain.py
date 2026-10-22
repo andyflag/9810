@@ -6,7 +6,7 @@ Amounts use Decimal / ROUND_HALF_UP. All dates are ISO business dates in Asia/Sh
 from __future__ import annotations
 from copy import deepcopy
 from datetime import date, timedelta, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, ROUND_FLOOR, ROUND_DOWN, localcontext
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import json
@@ -48,6 +48,31 @@ def money(value):
 
 def total(rows, key):
     return sum((dec(r.get(key)) for r in rows), Decimal(0))
+
+
+def allocate_money(amount, weights, denominator=None):
+    """Round proportional allocations to cents using largest remainders.
+
+    Negative refund rows retain their sign; a separate denominator allows a
+    settlement to have sales that are not yet completely allocated.
+    """
+    with localcontext() as ctx:
+        ctx.prec = 50
+        divisor = sum(map(dec, weights), Decimal(0)) if denominator is None else dec(denominator)
+        if not weights or divisor <= 0:
+            return [0.0] * len(weights)
+        numerators = [dec(amount) * 100 * dec(weight) for weight in weights]
+        cents = [(value / divisor).to_integral_value(rounding=ROUND_FLOOR) for value in numerators]
+        numerator_total = sum(numerators, Decimal(0))
+        target = (numerator_total / divisor).to_integral_value(rounding=ROUND_DOWN)
+        remainder = numerator_total - target * divisor
+        if abs(remainder) * 2 >= divisor:
+            target += -1 if numerator_total < 0 else 1
+        remaining = int(target - sum(cents, Decimal(0)))
+        order = sorted(range(len(cents)), key=lambda i: (-(numerators[i] - cents[i] * divisor), i))
+        for i in order[:remaining]:
+            cents[i] += 1
+        return [float(value / 100) if value else 0.0 for value in cents]
 
 
 def present(value):
@@ -99,9 +124,9 @@ def clean(kind, payload):
                         raise ValueError()
                     value = int(n)
                 else:
-                    if abs(n.as_tuple().exponent) > 8:
+                    if max(0, -n.normalize().as_tuple().exponent) > 8:
                         raise ValueError()
-                    value = format(n, "f")
+                    value = format(n.normalize(), "f") if n else "0"
             elif f["type"] == "date":
                 value = date.fromisoformat(str(value)).isoformat()
                 if kind == "sales" and key == "month":
@@ -196,11 +221,24 @@ def clean_settings(payload):
     return s
 
 
+def group_rows(rows, key):
+    groups = {}
+    for row in rows:
+        groups.setdefault(row[key], []).append(row)
+    return groups
+
+
 def compute(data, settings=None, today=None):
     settings = {**DEFAULT_SETTINGS, **(settings or {})}
     today = today or today_cn()
     data = {kind: deepcopy(data.get(kind, [])) for kind in ORDER}
     sku_index = {r["sku"]: r for r in data["skus"]}
+    sales_by_ledger = group_rows(data["sales"], "ledger_id")
+    sales_by_settlement = group_rows(data["sales"], "settlement_id")
+    taxes_by_ledger = group_rows(data["taxes"], "ledger_id")
+    exceptions_by_ledger = group_rows(data["exceptions"], "ledger_id")
+    documents_by_declaration = {r["declaration_no"]: r for r in data["documents"]}
+    receipts_by_settlement = {r["settlement_id"]: r for r in data["receipts"]}
     exports = {}
     for r in data["exports"]:
         sku = sku_index.get(r["sku"], {})
@@ -256,7 +294,7 @@ def compute(data, settings=None, today=None):
                 Decimal(0),
             )
         )
-        related = [s for s in data["sales"] if s["settlement_id"] == r["settlement_id"]]
+        related = sales_by_settlement.get(r["settlement_id"], [])
         r["allocated"] = money(total(related, "net_amount"))
         r["allocation_difference"] = money(dec(r["net_amount"]) - dec(r["allocated"]))
         r["converted_amount"] = (
@@ -273,23 +311,23 @@ def compute(data, settings=None, today=None):
         # Over-allocation must never manufacture cash beyond the actual receipt.
         denominator = max(dec(r["net_amount"]), dec(r["allocated"]))
         ratio = received / denominator if denominator > 0 else Decimal(0)
-        # Assign rounding residual to the last row so cent allocations remain consistent.
-        allocations = [money(dec(s["net_amount"]) * ratio) for s in related]
-        if allocations:
-            target = money(dec(r["allocated"]) * ratio)
-            allocations[-1] = money(dec(allocations[-1]) + dec(target) - sum(map(dec, allocations)))
+        allocations = allocate_money(received, [s["net_amount"] for s in related], denominator)
         for s, allocated in zip(related, allocations):
             s["received_allocated"] = allocated
             s["receipt_status"] = "已收汇" if ratio >= 1 else "部分收汇" if ratio > 0 else "待收汇"
     tax_remaining = {}
+    negative_normal_quantities = {}
     for ledger_id in exports:
-        sold = total([s for s in data["sales"] if s["ledger_id"] == ledger_id], "net_qty")
+        sold = total(sales_by_ledger.get(ledger_id, []), "net_qty")
         normal = total(
-            [t for t in data["taxes"] if t["ledger_id"] == ledger_id and t["method"] == NORMAL],
+            [t for t in taxes_by_ledger.get(ledger_id, []) if t["method"] == NORMAL],
             "quantity",
         )
-        tax_remaining[ledger_id] = max(Decimal(0), sold - normal)
-    for r in sorted(data["taxes"], key=lambda r: (r["declaration_date"], r.get("id", ""))):
+        tax_remaining[ledger_id] = max(Decimal(0), min(sold, sold - normal))
+        if normal < 0:
+            negative_normal_quantities[ledger_id] = normal
+    # Stable input order is persisted and exported; generated record IDs are not.
+    for r in sorted(data["taxes"], key=lambda r: r["declaration_date"]):
         e = exports.get(r["ledger_id"], {})
         r["sku"], r["export_date"] = e.get("sku"), e.get("export_date")
         r["receipt_deadline"] = deadline(e.get("export_date"), settings)
@@ -361,13 +399,11 @@ def compute(data, settings=None, today=None):
         )
     ledger = []
     for e in data["exports"]:
-        ss = [s for s in data["sales"] if s["ledger_id"] == e["ledger_id"]]
-        ts = [t for t in data["taxes"] if t["ledger_id"] == e["ledger_id"]]
+        ss = sales_by_ledger.get(e["ledger_id"], [])
+        ts = taxes_by_ledger.get(e["ledger_id"], [])
         ps = [t for t in ts if t["method"] == PRE]
-        xs = [x for x in data["exceptions"] if x["ledger_id"] == e["ledger_id"]]
-        ds = next(
-            (d for d in data["documents"] if d["declaration_no"] == e["declaration_no"]), None
-        )
+        xs = exceptions_by_ledger.get(e["ledger_id"], [])
+        ds = documents_by_declaration.get(e["declaration_no"])
         r = dict(e)
         r.update(
             net_sold=int(total(ss, "net_qty")),
@@ -424,8 +460,15 @@ def compute(data, settings=None, today=None):
             alerts.append(("warning", "销售佐证超期"))
         if any(x.get("tax_adjustment") == "待处理" for x in xs):
             alerts.append(("warning", "异常退税待处理"))
+        negative_normal = negative_normal_quantities.get(e["ledger_id"])
+        if negative_normal is not None:
+            alerts.append((
+                "warning",
+                f"正常申报累计数量为 {negative_normal:f} 件，请核对冲减记录；"
+                f"预退税可分配销量按实际净销量 {r['net_sold']} 件封顶",
+            ))
         settlement_ids = {s["settlement_id"] for s in ss}
-        linked = [p for p in data["receipts"] if p["settlement_id"] in settlement_ids]
+        linked = [receipts_by_settlement[key] for key in settlement_ids if key in receipts_by_settlement]
         if any(p["allocation_difference"] != 0 for p in linked):
             alerts.append(("warning", "结算分摊差异"))
         if len(linked) != len(settlement_ids):
@@ -435,8 +478,9 @@ def compute(data, settings=None, today=None):
         r["alerts"] = [{"level": level, "text": text} for level, text in alerts]
         ledger.append(r)
     currencies = {}
-    for currency in sorted({e["currency"] for e in ledger}):
-        group = [e for e in ledger if e["currency"] == currency]
+    by_currency = group_rows(ledger, "currency")
+    for currency in sorted(by_currency):
+        group = by_currency[currency]
         currencies[currency] = {
             "net_revenue": money(total(group, "net_revenue")),
             "received": money(total(group, "received_amount")),

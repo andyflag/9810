@@ -15,16 +15,23 @@
   },
   "dependencies": {
     "decimal.js": "10.6.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "drizzle-orm": "0.45.2"
+    "drizzle-orm": "0.45.2",
+    "fflate": "0.8.3",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261019.1",
+    "@types/node": "22.19.19",
+    "drizzle-kit": "0.31.11",
     "esbuild": "0.25.12",
-    "wrangler": "4.92.0",
-    "drizzle-kit": "0.31.10",
+    "miniflare": "5.20261019.2-beta",
     "tsx": "4.20.6",
     "typescript": "5.9.3",
-    "@cloudflare/workers-types": "4.20260515.1",
-    "@types/node": "22.19.19"
+    "wrangler": "4.152.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "0.25.12"
+    }
   }
 }

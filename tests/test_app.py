@@ -1,4 +1,3 @@
-from copy import deepcopy
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -12,8 +11,6 @@ from backend.domain import (
     ROOT,
     ORDER,
     DEFAULT_SETTINGS,
-    PRE,
-    NORMAL,
     clean,
     compute,
     validate_state,
@@ -21,6 +18,24 @@ from backend.domain import (
 )
 
 HEADERS = {"X-Requested-With": "9810"}
+
+
+class ScopedClient(TestClient):
+    """Model the UI selecting the workspace returned by identity operations."""
+
+    def request(self, method, url, *args, **kwargs):
+        response = super().request(method, url, *args, **kwargs)
+        path = response.request.url.path
+        if response.status_code == 200 and path in (
+            "/api/auth/register",
+            "/api/auth/login",
+            "/api/workspaces/switch",
+            "/api/invitations/accept",
+        ):
+            self.headers["X-Workspace-ID"] = response.json()["tenant_id"]
+        if response.status_code == 200 and path == "/api/auth/logout":
+            self.headers.pop("X-Workspace-ID", None)
+        return response
 
 
 @pytest.fixture
@@ -33,7 +48,7 @@ def sample():
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DATA_DIR", tmp_path)
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.sqlite3")
-    with TestClient(app, headers=HEADERS) as c:
+    with ScopedClient(app, headers=HEADERS) as c:
         assert (
             c.post(
                 "/api/auth/register",
@@ -227,7 +242,7 @@ def test_viewer_invitation_and_session_revocation(client):
     assert client.delete("/api/team/" + viewer_id).status_code == 200
     client.cookies.clear()
     client.cookies.set("session9810", viewer_cookie)
-    assert client.get("/api/state").status_code == 401
+    assert client.get("/api/state").status_code == 403
 
 
 def test_crud_concurrency_and_dependency_guards(client):

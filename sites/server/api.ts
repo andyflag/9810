@@ -7,6 +7,7 @@ import {
   validateState,
   D,
   money,
+  allocateMoney,
   RuleError,
   type Row,
 } from './domain';
@@ -18,6 +19,7 @@ import {
   record,
   version,
   audit,
+  auditStatement,
   hash,
   uuid,
   now,
@@ -31,9 +33,19 @@ const json = (data: any, status = 200) =>
   Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 async function body(request: Request) {
   try {
-    return (await request.json()) as Row;
+    const value = await request.json();
+    if (value === null || typeof value !== 'object' || Array.isArray(value))
+      throw new RuleError('请求数据必须为 JSON 对象');
+    return value as Row;
   } catch {
     throw new RuleError('请求数据格式不正确');
+  }
+}
+async function formData(request: Request) {
+  try {
+    return await request.formData();
+  } catch {
+    throw new RuleError('上传请求格式不正确');
   }
 }
 function email(value: any) {
@@ -43,7 +55,11 @@ function email(value: any) {
   if (!/^[^\s@]{1,100}@[^\s@]{1,100}\.[^\s@]{2,30}$/.test(s)) throw new RuleError('请输入有效邮箱');
   return s;
 }
-const cleanId = (v: any) => String(v || '').slice(0, 150);
+const cleanId = (value: unknown) => {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,150}$/.test(value))
+    throw new RuleError('企业标识格式不正确');
+  return value;
+};
 export async function api(request: Request, env: Env, template: () => Response): Promise<Response> {
   const url = new URL(request.url),
     path = url.pathname,
@@ -56,7 +72,12 @@ export async function api(request: Request, env: Env, template: () => Response):
     if (tables?.count !== 5) throw new HttpError(503, '云端数据库正在初始化');
     return json({ status: 'ok', version: '1.0.0-sites', storage: 'ready' });
   }
-  const ctx = await context(request, env),
+  const identityOperation =
+    method === 'POST' && ['/api/workspaces/switch', '/api/invitations/accept'].includes(path);
+  const ctx = await context(request, env, {
+      allowDefault: identityOperation || ['/api/state', '/api/template'].includes(path),
+      ignoreWorkspace: identityOperation,
+    }),
     db = env.DB,
     id = ctx.workspace.id;
   if (path === '/api/state' && method === 'GET') {
@@ -93,19 +114,21 @@ export async function api(request: Request, env: Env, template: () => Response):
     });
   }
   if (path === '/api/workspaces/switch' && method === 'POST') {
-    const b = await body(request);
+    const b = await body(request),
+      tenantId = cleanId(b.tenant_id);
     const membership = await db
       .prepare('SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=?')
-      .bind(cleanId(b.tenant_id), ctx.user.id)
+      .bind(tenantId, ctx.user.id)
       .first();
     if (!membership) throw new HttpError(403, '无权访问该企业');
-    await db
+    const changed = await db
       .prepare(
         'UPDATE preferences SET workspace_id=? WHERE user_id=? AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=?)',
       )
-      .bind(b.tenant_id, ctx.user.id, b.tenant_id, ctx.user.id)
+      .bind(tenantId, ctx.user.id, tenantId, ctx.user.id)
       .run();
-    return json({ ok: true });
+    if (!changed.meta.changes) throw new HttpError(403, '企业访问权限已被撤销');
+    return json({ ok: true, tenant_id: tenantId });
   }
   if (path === '/api/team' && method === 'GET') {
     requireOwner(ctx);
@@ -126,19 +149,32 @@ export async function api(request: Request, env: Env, template: () => Response):
       address = email(b.email),
       role = b.role || 'editor';
     if (!['editor', 'viewer'].includes(role)) throw new RuleError('邀请角色必须为编辑或只读');
-    const token = uuid() + uuid();
-    await db.batch([
-      db
-        .prepare('DELETE FROM invitations WHERE workspace_id=? AND email=? AND used_at IS NULL')
-        .bind(id, address),
+    const existing = await db
+      .prepare('SELECT 1 FROM memberships WHERE workspace_id=? AND email=?')
+      .bind(id, address)
+      .first();
+    if (existing) throw new HttpError(409, '该成员已在企业中，无需重复邀请');
+    const token = uuid() + uuid(),
+      mutation = uuid();
+    const results = await db.batch([
       db
         .prepare(
-          'INSERT INTO invitations(token_hash,workspace_id,email,role,expires_at) VALUES(?,?,?,?,?)',
+          "UPDATE workspaces SET revision=revision+1,mutation_id=? WHERE id=? AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=? AND role='owner') AND NOT EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND email=?)",
         )
-        .bind(await hash(token), id, address, role, Date.now() + 7 * 86400000),
-      db.prepare('UPDATE workspaces SET revision=revision+1 WHERE id=?').bind(id),
+        .bind(mutation, id, id, ctx.user.id, id, address),
+      db
+        .prepare(
+          'DELETE FROM invitations WHERE workspace_id=? AND email=? AND used_at IS NULL AND EXISTS(SELECT 1 FROM workspaces WHERE id=? AND mutation_id=?)',
+        )
+        .bind(id, address, id, mutation),
+      db
+        .prepare(
+          'INSERT INTO invitations(token_hash,workspace_id,email,role,expires_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM workspaces WHERE id=? AND mutation_id=?)',
+        )
+        .bind(await hash(token), id, address, role, Date.now() + 7 * 86400000, id, mutation),
+      auditStatement(ctx, '邀请成员', address, null, { role }, mutation),
     ]);
-    await audit(ctx, '邀请成员', address, null, { role });
+    if (!results[0].meta.changes) throw new HttpError(409, '成员或权限已变化，请刷新后重试');
     return json({ token, expires_days: 7 });
   }
   if (path === '/api/invitations/accept' && method === 'POST') {
@@ -151,10 +187,17 @@ export async function api(request: Request, env: Env, template: () => Response):
     if (!invitation) throw new RuleError('邀请已过期或已使用');
     if (invitation.email !== ctx.user.email)
       throw new HttpError(403, '请使用受邀邮箱对应的 ChatGPT 账号登录');
-    await db.batch([
+    const mutation = uuid(),
+      joinedContext = { ...ctx, workspace: { ...ctx.workspace, id: invitation.workspace_id } };
+    const results = await db.batch([
       db
         .prepare(
-          'INSERT INTO memberships(id,workspace_id,user_id,email,name,role) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM invitations WHERE token_hash=? AND used_at IS NULL AND expires_at>? AND email=?) ON CONFLICT DO NOTHING',
+          'UPDATE invitations SET used_at=?,claim_id=? WHERE token_hash=? AND used_at IS NULL AND expires_at>? AND email=?',
+        )
+        .bind(now(), mutation, token, Date.now(), ctx.user.email),
+      db
+        .prepare(
+          'INSERT INTO memberships(id,workspace_id,user_id,email,name,role) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM invitations WHERE token_hash=? AND claim_id=?) ON CONFLICT DO NOTHING',
         )
         .bind(
           invitation.workspace_id + ':' + ctx.user.id,
@@ -164,46 +207,64 @@ export async function api(request: Request, env: Env, template: () => Response):
           ctx.user.name,
           invitation.role,
           token,
-          Date.now(),
-          ctx.user.email,
+          mutation,
         ),
       db
         .prepare(
-          'UPDATE preferences SET workspace_id=? WHERE user_id=? AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=?)',
+          'UPDATE preferences SET workspace_id=? WHERE user_id=? AND EXISTS(SELECT 1 FROM invitations WHERE token_hash=? AND claim_id=?) AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=?)',
         )
-        .bind(invitation.workspace_id, ctx.user.id, invitation.workspace_id, ctx.user.id),
+        .bind(
+          invitation.workspace_id,
+          ctx.user.id,
+          token,
+          mutation,
+          invitation.workspace_id,
+          ctx.user.id,
+        ),
       db
         .prepare(
-          'UPDATE invitations SET used_at=? WHERE token_hash=? AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=?)',
+          'UPDATE workspaces SET revision=revision+1,mutation_id=? WHERE id=? AND EXISTS(SELECT 1 FROM invitations WHERE token_hash=? AND claim_id=?)',
         )
-        .bind(now(), token, invitation.workspace_id, ctx.user.id),
-      db
-        .prepare('UPDATE workspaces SET revision=revision+1 WHERE id=?')
-        .bind(invitation.workspace_id),
+        .bind(mutation, invitation.workspace_id, token, mutation),
+      auditStatement(joinedContext, '加入企业', ctx.user.email, null, null, mutation),
     ]);
-    await audit(
-      { ...ctx, workspace: { ...ctx.workspace, id: invitation.workspace_id } },
-      '加入企业',
-      ctx.user.email,
-    );
-    return json({ ok: true });
+    if (!results[0].meta.changes) throw new RuleError('邀请已过期、已使用或已被撤销');
+    return json({ ok: true, tenant_id: invitation.workspace_id });
   }
   if (path.startsWith('/api/team/') && method === 'DELETE') {
     requireOwner(ctx);
-    const userId = decodeURIComponent(path.slice('/api/team/'.length));
+    let userId: string;
+    try {
+      userId = decodeURIComponent(path.slice('/api/team/'.length));
+    } catch {
+      throw new RuleError('成员标识格式不正确');
+    }
     const member = await db
       .prepare('SELECT * FROM memberships WHERE workspace_id=? AND user_id=?')
       .bind(id, userId)
       .first<Row>();
     if (!member) throw new HttpError(404, '成员不存在');
     if (member.role === 'owner') throw new HttpError(409, '不能移除管理员');
-    await db.batch([
+    const mutation = uuid();
+    const results = await db.batch([
       db
-        .prepare("DELETE FROM memberships WHERE workspace_id=? AND user_id=? AND role!='owner'")
-        .bind(id, userId),
-      db.prepare('UPDATE workspaces SET revision=revision+1 WHERE id=?').bind(id),
+        .prepare(
+          "UPDATE workspaces SET revision=revision+1,mutation_id=? WHERE id=? AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=? AND role='owner') AND EXISTS(SELECT 1 FROM memberships WHERE workspace_id=? AND user_id=? AND role!='owner')",
+        )
+        .bind(mutation, id, id, ctx.user.id, id, userId),
+      db
+        .prepare(
+          'DELETE FROM invitations WHERE workspace_id=? AND email=? AND used_at IS NULL AND EXISTS(SELECT 1 FROM workspaces WHERE id=? AND mutation_id=?)',
+        )
+        .bind(id, member.email, id, mutation),
+      db
+        .prepare(
+          "DELETE FROM memberships WHERE workspace_id=? AND user_id=? AND role!='owner' AND EXISTS(SELECT 1 FROM workspaces WHERE id=? AND mutation_id=?)",
+        )
+        .bind(id, userId, id, mutation),
+      auditStatement(ctx, '移除成员', userId, null, null, mutation),
     ]);
-    await audit(ctx, '移除成员', userId);
+    if (!results[0].meta.changes) throw new HttpError(409, '成员或权限已变化，请刷新后重试');
     return json({ ok: true });
   }
   if (path === '/api/audit' && method === 'GET') {
@@ -224,8 +285,20 @@ export async function api(request: Request, env: Env, template: () => Response):
     const b = await body(request);
     if (b.version !== ctx.workspace.revision)
       throw new HttpError(409, '数据已更新，请刷新后重新保存参数');
-    const settings = cleanSettings(b.data || {});
-    await save(ctx, ctx.records, '修改企业参数', 'settings', ctx.settings, settings, settings);
+    if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data))
+      throw new RuleError('企业参数必须为 JSON 对象');
+    const settings = cleanSettings(b.data);
+    await save(
+      ctx,
+      ctx.records,
+      '修改企业参数',
+      'settings',
+      ctx.settings,
+      settings,
+      settings,
+      ctx.files,
+      true,
+    );
     return json({ ok: true });
   }
   if (path === '/api/demo' && method === 'POST') {
@@ -250,7 +323,7 @@ export async function api(request: Request, env: Env, template: () => Response):
   }
   if (path === '/api/import' && method === 'POST') {
     requireWrite(ctx);
-    const form = await request.formData(),
+    const form = await formData(request),
       file = form.get('file');
     if (!(file instanceof File)) throw new RuleError('请选择 Excel 文件');
     if (file.size > 10 * 1024 * 1024) throw new RuleError('Excel 文件不得超过 10 MB');
@@ -274,6 +347,18 @@ export async function api(request: Request, env: Env, template: () => Response):
     const b = await body(request);
     if (!Number.isInteger(b.quantity) || b.quantity <= 0 || b.quantity > 1000000000)
       throw new RuleError('售出数量须为正整数');
+    if (b.commit !== undefined && typeof b.commit !== 'boolean')
+      throw new RuleError('是否提交必须为布尔值');
+    for (const field of ['gross', 'fees']) {
+      try {
+        if (!['number', 'string'].includes(typeof b[field]) || b[field] === '') throw Error();
+        const amount = D(b[field]);
+        if (!amount.isFinite() || amount.abs().gt('1000000000000') || amount.decimalPlaces() > 8)
+          throw Error();
+      } catch {
+        throw new RuleError('销售金额和费用必须填写有效数字');
+      }
+    }
     if (b.commit && b.revision !== ctx.workspace.revision)
       throw new HttpError(409, '台账已变化，请重新预览 FIFO 分配');
     const receipt = ctx.records.receipts.find((r) => r.settlement_id === b.settlement_id);
@@ -320,12 +405,15 @@ export async function api(request: Request, env: Env, template: () => Response):
     }
     if (remaining)
       throw new RuleError(`可用库存不足，还差 ${remaining} 件；请核对 SKU、站点和币种`);
-    for (const f of ['gross', 'fees'])
-      rows.at(-1)![f] = money(
-        D(b[f]).minus(
-          rows.slice(0, -1).reduce<ReturnType<typeof D>>((sum, r) => sum.plus(D(r[f])), D(0)),
-        ),
+    for (const field of ['gross', 'fees']) {
+      const allocated = allocateMoney(
+        b[field],
+        rows.map((row) => row.sold_qty),
       );
+      rows.forEach((row, index) => {
+        row[field] = allocated[index];
+      });
+    }
     rows = rows.map((r) => clean('sales', r));
     const records = structuredClone(ctx.records);
     records.sales.push(...rows.map((r) => ({ ...r, id: uuid(), version: 1 })));
@@ -337,7 +425,7 @@ export async function api(request: Request, env: Env, template: () => Response):
   if (recordsMatch) {
     requireWrite(ctx);
     const [, kind, recordId] = recordsMatch;
-    if (!SCHEMA[kind]) throw new HttpError(404, '台账不存在');
+    if (!Object.hasOwn(SCHEMA, kind)) throw new HttpError(404, '台账不存在');
     const records = structuredClone(ctx.records);
     if (method === 'POST' && !recordId) {
       const b = await body(request),
@@ -382,7 +470,7 @@ export async function api(request: Request, env: Env, template: () => Response):
   if (upload && method === 'POST') {
     requireWrite(ctx);
     const doc = record(ctx, 'documents', upload[1]),
-      form = await request.formData(),
+      form = await formData(request),
       file = form.get('file');
     if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024)
       throw new RuleError('附件需为 1 字节至 10 MB');
@@ -397,7 +485,8 @@ export async function api(request: Request, env: Env, template: () => Response):
       txt: 'text/plain',
       csv: 'text/csv',
     };
-    const mime = allowed[name.split('.').at(-1)!.toLowerCase()];
+    const extension = name.split('.').at(-1)!.toLowerCase();
+    const mime = Object.hasOwn(allowed, extension) ? allowed[extension] : undefined;
     if (!mime) throw new RuleError('支持 PDF、PNG、JPG、XLSX、DOCX、TXT 和 CSV 附件');
     if (ctx.files.reduce((a, r) => a + r.size, 0) + file.size > 100 * 1024 * 1024)
       throw new RuleError('当前企业附件总容量上限为 100 MB');

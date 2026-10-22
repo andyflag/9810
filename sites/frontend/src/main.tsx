@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   LayoutDashboard,
@@ -45,7 +45,20 @@ import {
   Eye,
   Info,
 } from 'lucide-react';
-import { api, labels, roles, kindOrder, num, cash, tone, display, cnToday } from './types';
+import {
+  api,
+  labels,
+  roles,
+  kindOrder,
+  num,
+  cash,
+  tone,
+  display,
+  cnToday,
+  getWorkspaceId,
+  setWorkspaceId,
+  downloadUrl,
+} from './types';
 import type { State, Row, Kind, Page, Field } from './types';
 import './styles.css';
 import {
@@ -130,26 +143,42 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  busy = false,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
   onClose: () => void;
   wide?: boolean;
+  busy?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (busy) ref.current?.focus();
+  }, [busy]);
   useEffect(() => {
     const prior = document.activeElement as HTMLElement;
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     ref.current?.focus();
     const handle = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeRef.current();
+      }
       if (e.key === 'Tab') {
         const elements = Array.from(
           ref.current?.querySelectorAll<HTMLElement>(
-            'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]',
+            'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],summary,[tabindex="0"]',
           ) || [],
-        );
+        ).filter((element) => element.getClientRects().length > 0);
+        if (!elements.length) {
+          e.preventDefault();
+          ref.current?.focus();
+          return;
+        }
         const first = elements[0],
           last = elements[elements.length - 1];
         if (
@@ -166,7 +195,7 @@ export function Modal({
     };
     document.addEventListener('keydown', handle);
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handle);
       prior?.focus();
     };
@@ -183,6 +212,7 @@ export function Modal({
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
+        aria-busy={busy}
         aria-label={title}
         className={'modal ' + (wide ? 'wide' : '')}
       >
@@ -191,7 +221,7 @@ export function Modal({
             <h2>{title}</h2>
             {subtitle && <p>{subtitle}</p>}
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭">
+          <button className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭">
             <X size={20} />
           </button>
         </div>
@@ -265,21 +295,155 @@ function App() {
     [site, setSite] = useState(''),
     [currency, setCurrency] = useState('USD'),
     [pageNo, setPageNo] = useState(1),
-    [allFields, setAllFields] = useState(false);
-  async function load() {
+    [allFields, setAllFields] = useState(false),
+    [compact, setCompact] = useState(() => window.matchMedia('(max-width: 760px)').matches),
+    [pageDirty, setPageDirty] = useState(false),
+    [pageBusy, setPageBusy] = useState(false),
+    [syncedAt, setSyncedAt] = useState<Date | null>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const stateRequest = useRef<{ sequence: number; controller?: AbortController }>({ sequence: 0 });
+  const currentTenant = useRef<string | null>(null);
+  const modalOpen = Boolean(editor || importing || fifo || detail);
+  const rows = useMemo<Row[]>(
+    () =>
+      !state
+        ? []
+        : page === 'dashboard'
+          ? state.ledger
+          : kindOrder.includes(page as Kind)
+            ? state.records[page as Kind]
+            : [],
+    [state, page],
+  );
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return rows.filter(
+      (r) =>
+        (!needle || JSON.stringify(r).toLowerCase().includes(needle)) &&
+        (!site || r.site === site) &&
+        (filter === 'all' ||
+          (filter === 'attention' && r.alerts?.length) ||
+          (filter === 'received' && r.receipt_status === '已售部分已收汇')),
+    );
+  }, [rows, query, site, filter]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / 10));
+  const currentPage = Math.min(pageNo, pageCount);
+  const shown = filtered.slice((currentPage - 1) * 10, currentPage * 10);
+  useEffect(() => setPageNo((n) => Math.min(n, pageCount)), [pageCount]);
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 760px)');
+    const update = () => {
+      setCompact(media.matches);
+      if (!media.matches) setMobile(false);
+    };
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    if (!compact || !mobile) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    sidebarRef.current?.querySelector<HTMLButtonElement>('[aria-label="关闭导航"]')?.focus();
+    const handle = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobile(false);
+      }
+      if (event.key !== 'Tab') return;
+      const elements = Array.from(
+        sidebarRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]),select:not([disabled]),a[href]',
+        ) || [],
+      ).filter((el) => el.getClientRects().length > 0);
+      const first = elements[0],
+        last = elements.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener('keydown', handle);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handle);
+      menuButtonRef.current?.focus();
+    };
+  }, [compact, mobile]);
+  useEffect(() => {
+    if (!pageDirty) return;
+    const handle = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handle);
+    return () => window.removeEventListener('beforeunload', handle);
+  }, [pageDirty]);
+  function resetWorkspaceView() {
+    setPage('dashboard');
+    setPageDirty(false);
+    setPageBusy(false);
+    setMobile(false);
+    setEditor(null);
+    setImporting(false);
+    setFifo(false);
+    setDetail(null);
+    setQuery('');
+    setSite('');
+    setFilter('all');
+    setPageNo(1);
+    setAllFields(false);
+  }
+  function canLeave() {
+    return !pageBusy && (!pageDirty || window.confirm('企业设置尚未保存，确定离开并放弃修改？'));
+  }
+  async function load(workspaceId = getWorkspaceId()) {
+    stateRequest.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = ++stateRequest.current.sequence;
+    stateRequest.current.controller = controller;
     try {
-      const data = await api<State>('/state');
+      let data: State;
+      try {
+        data = await api<State>('/state', 'GET', undefined, {
+          workspaceId,
+          signal: controller.signal,
+        });
+      } catch (e: any) {
+        if (e.status !== 403 || !workspaceId) throw e;
+        // A removed membership or another signed-in account invalidates this tab's saved choice.
+        data = await api<State>('/state', 'GET', undefined, {
+          workspaceId: null,
+          signal: controller.signal,
+        });
+      }
+      if (sequence !== stateRequest.current.sequence) return;
+      if (currentTenant.current !== data.user.tenant_id) resetWorkspaceView();
+      if (data.user.role !== 'owner' && ['settings', 'team', 'audit'].includes(page))
+        setPage('dashboard');
+      currentTenant.current = data.user.tenant_id;
+      setWorkspaceId(data.user.tenant_id);
       setState(data);
+      setSyncedAt(new Date());
       setBootError('');
     } catch (e: any) {
-      if (e.status === 401) setState(null);
-      else throw e;
+      if (controller.signal.aborted || sequence !== stateRequest.current.sequence) return;
+      if (e.status === 401) {
+        setWorkspaceId(null);
+        currentTenant.current = null;
+        setState(null);
+        resetWorkspaceView();
+      } else throw e;
     } finally {
-      setLoading(false);
+      if (sequence === stateRequest.current.sequence) setLoading(false);
     }
   }
   useEffect(() => {
     load().catch((e) => setBootError(e.message));
+    return () => stateRequest.current.controller?.abort();
   }, []);
   useEffect(() => {
     setQuery('');
@@ -297,12 +461,51 @@ function App() {
     return () => clearTimeout(t);
   }, [toast]);
   async function authenticated() {
+    setWorkspaceId(null);
     const token = new URLSearchParams(location.search).get('invite');
     if (token) {
-      await api('/invitations/accept', 'POST', { token });
+      const joined = await api<{ tenant_id: string }>(
+        '/invitations/accept',
+        'POST',
+        { token },
+        { workspaceId: null },
+      );
       history.replaceState(null, '', location.pathname);
+      await load(joined.tenant_id);
+    } else await load(null);
+  }
+  async function acceptInvitation() {
+    if (busy || !canLeave()) return;
+    setBusy(true);
+    try {
+      const joined = await api<{ tenant_id: string }>('/invitations/accept', 'POST', {
+        token: new URLSearchParams(location.search).get('invite'),
+      });
+      history.replaceState(null, '', location.pathname);
+      await load(joined.tenant_id);
+      setToast('已加入邀请企业');
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setBusy(false);
     }
-    await load();
+  }
+  async function switchWorkspace(tenantId: string) {
+    if (busy || !canLeave()) return;
+    setBusy(true);
+    setLoading(true);
+    try {
+      const result = await api<{ tenant_id: string }>('/workspaces/switch', 'POST', {
+        tenant_id: tenantId,
+      });
+      await load(result.tenant_id);
+      setToast('已切换企业');
+    } catch (e: any) {
+      setToast(e.message);
+    } finally {
+      setLoading(false);
+      setBusy(false);
+    }
   }
   async function changed(message = '已保存，核算结果已更新') {
     await load();
@@ -320,6 +523,8 @@ function App() {
     }
   }
   function nav(next: Page) {
+    if (next !== page && !canLeave()) return;
+    setPageDirty(false);
     setPage(next);
     setMobile(false);
   }
@@ -349,6 +554,7 @@ function App() {
   if (!state) return <Auth onSuccess={authenticated} />;
   const editable = state.user.role !== 'viewer';
   const owner = state.user.role === 'owner';
+  const firstSkuNeeded = (page === 'dashboard' || page === 'exports') && !state.records.skus.length;
   const empty = state.stats.export_count === 0;
   const currentCurrency = Object.keys(state.stats.currencies).includes(currency)
     ? currency
@@ -357,21 +563,6 @@ function App() {
   const alerts = state.ledger
     .flatMap((r) => r.alerts.map((a: Row) => ({ ...a, ledger: r })))
     .sort((a, b) => (a.level === 'danger' ? 0 : 1) - (b.level === 'danger' ? 0 : 1));
-  const rows =
-    page === 'dashboard'
-      ? state.ledger
-      : kindOrder.includes(page as Kind)
-        ? state.records[page as Kind]
-        : [];
-  const filtered = rows.filter(
-    (r) =>
-      JSON.stringify(r).toLowerCase().includes(query.toLowerCase()) &&
-      (!site || r.site === site) &&
-      (filter === 'all' ||
-        (filter === 'attention' && r.alerts?.length) ||
-        (filter === 'received' && r.receipt_status === '已售部分已收汇')),
-  );
-  const shown = filtered.slice((pageNo - 1) * 10, pageNo * 10);
   function add(kind: Kind, defaults?: Row) {
     setEditor({ kind, defaults });
   }
@@ -411,7 +602,16 @@ function App() {
   ];
   return (
     <div className="app-shell">
-      <aside className={'sidebar ' + (mobile ? 'visible' : '')}>
+      <aside
+        ref={sidebarRef}
+        id="workspace-navigation"
+        className={'sidebar ' + (mobile ? 'visible' : '')}
+        inert={modalOpen || (compact && !mobile)}
+        aria-hidden={compact && !mobile ? true : undefined}
+        role={compact && mobile ? 'dialog' : undefined}
+        aria-modal={compact && mobile ? true : undefined}
+        aria-label="工作空间导航"
+      >
         <div className="logo">
           <span className="logo-mark">
             <Layers3 size={23} />
@@ -436,12 +636,12 @@ function App() {
             <select
               aria-label="切换企业"
               value={state.user.tenant_id}
-              onChange={(e) =>
-                action(
-                  () => api('/workspaces/switch', 'POST', { tenant_id: e.target.value }),
-                  '已切换企业',
-                )
-              }
+              disabled={busy || pageBusy}
+              onChange={(e) => {
+                const target = e.target.value;
+                e.target.value = state.user.tenant_id;
+                switchWorkspace(target);
+              }}
             >
               {state.workspaces.map((w) => (
                 <option key={w.id} value={w.id}>
@@ -454,7 +654,11 @@ function App() {
         </div>
         <div className="nav-label">工作空间</div>
         <nav>
-          <button className={page === 'dashboard' ? 'active' : ''} onClick={() => nav('dashboard')}>
+          <button
+            className={page === 'dashboard' ? 'active' : ''}
+            aria-current={page === 'dashboard' ? 'page' : undefined}
+            onClick={() => nav('dashboard')}
+          >
             <LayoutDashboard size={18} />
             工作台
             {state.stats.risk_count > 0 && (
@@ -467,7 +671,12 @@ function App() {
             .map((k) => {
               const Icon = icons[k];
               return (
-                <button key={k} className={page === k ? 'active' : ''} onClick={() => nav(k)}>
+                <button
+                  key={k}
+                  className={page === k ? 'active' : ''}
+                  aria-current={page === k ? 'page' : undefined}
+                  onClick={() => nav(k)}
+                >
                   <Icon size={18} />
                   {labels[k]}
                   <span className="nav-order">0{kindOrder.indexOf(k) + 1}</span>
@@ -478,7 +687,12 @@ function App() {
           {(['skus', ...(owner ? ['settings', 'team', 'audit'] : [])] as Page[]).map((k) => {
             const Icon = icons[k];
             return (
-              <button key={k} className={page === k ? 'active' : ''} onClick={() => nav(k)}>
+              <button
+                key={k}
+                className={page === k ? 'active' : ''}
+                aria-current={page === k ? 'page' : undefined}
+                onClick={() => nav(k)}
+              >
                 <Icon size={18} />
                 {labels[k]}
               </button>
@@ -499,6 +713,10 @@ function App() {
             <a
               title="退出登录"
               className="icon-button"
+              onClick={(event) => {
+                if (!canLeave()) event.preventDefault();
+                else setWorkspaceId(null);
+              }}
               href="/signout-with-chatgpt?return_to=%2F"
               target="_top"
             >
@@ -508,12 +726,15 @@ function App() {
         </div>
       </aside>
       {mobile && <div className="sidebar-scrim" onClick={() => setMobile(false)} />}
-      <div className="main-shell">
+      <div className="main-shell" inert={modalOpen || (compact && mobile)}>
         <header className="topbar">
           <div className="breadcrumb">
             <button
               className="mobile-only icon-button"
+              ref={menuButtonRef}
               onClick={() => setMobile(true)}
+              aria-expanded={mobile}
+              aria-controls="workspace-navigation"
               aria-label="打开导航"
             >
               <Menu size={20} />
@@ -524,7 +745,9 @@ function App() {
           </div>
           <div className="topbar-right">
             <span className="saved-dot" />
-            数据已同步
+            <span title={syncedAt?.toLocaleString('zh-CN')}>
+              已同步 {syncedAt?.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+            </span>
             <span className="top-divider" />
             <span className="today">
               {new Intl.DateTimeFormat('zh-CN', {
@@ -537,7 +760,10 @@ function App() {
             <button
               className="icon-button"
               title="刷新数据"
-              onClick={() => action(async () => {}, '已刷新')}
+              disabled={busy}
+              onClick={() => {
+                if (canLeave()) action(async () => {}, '已刷新');
+              }}
             >
               <RefreshCw size={16} className={busy ? 'spin' : ''} />
             </button>
@@ -548,17 +774,7 @@ function App() {
             <div className="invitation-banner">
               <Users size={18} />
               <span>收到企业邀请 · 当前登录 {state.user.email}</span>
-              <button
-                className="primary"
-                onClick={() =>
-                  action(async () => {
-                    await api('/invitations/accept', 'POST', {
-                      token: new URLSearchParams(location.search).get('invite'),
-                    });
-                    history.replaceState(null, '', location.pathname);
-                  }, '已加入邀请企业')
-                }
-              >
+              <button className="primary" disabled={busy} onClick={acceptInvitation}>
                 接受邀请
                 <ArrowRight size={15} />
               </button>
@@ -571,7 +787,7 @@ function App() {
               </div>
               <h1>
                 {page === 'dashboard' ? '核销工作台' : labels[page]}
-                {page === 'dashboard' && <span className="live-tag">实时概览</span>}
+                {page === 'dashboard' && <span className="live-tag">核算概览</span>}
               </h1>
               <p>
                 {page === 'dashboard'
@@ -588,17 +804,30 @@ function App() {
             <div className="heading-actions">
               {(page === 'dashboard' || kindOrder.includes(page as Kind)) && (
                 <>
-                  <button onClick={() => setImporting(true)} disabled={!editable}>
+                  <button onClick={() => setImporting(true)} disabled={!editable || busy}>
                     <ArrowUpFromLine size={16} />
                     导入 Excel
                   </button>
                   {editable && (
                     <button
                       className="primary"
-                      onClick={() => add(page === 'dashboard' ? 'exports' : (page as Kind))}
+                      disabled={busy}
+                      onClick={() =>
+                        add(
+                          firstSkuNeeded
+                            ? 'skus'
+                            : page === 'dashboard'
+                              ? 'exports'
+                              : (page as Kind),
+                        )
+                      }
                     >
                       <Plus size={18} />
-                      {page === 'dashboard' ? '新建报关' : '新增记录'}
+                      {firstSkuNeeded
+                        ? '建立 SKU 档案'
+                        : page === 'dashboard'
+                          ? '新建报关'
+                          : '新增记录'}
                     </button>
                   )}
                 </>
@@ -734,7 +963,10 @@ function App() {
                         {allFields ? '常用字段' : '全部字段'}
                       </button>
                     )}
-                    <a className="button small-button" href="/api/export">
+                    <a
+                      className="button small-button"
+                      href={downloadUrl('/export', state.user.tenant_id)}
+                    >
                       <ArrowDownToLine size={15} />
                       导出
                     </a>
@@ -809,10 +1041,19 @@ function App() {
                       <div>
                         <button
                           className="primary"
-                          onClick={() => add(page === 'dashboard' ? 'exports' : (page as Kind))}
+                          disabled={busy}
+                          onClick={() =>
+                            add(
+                              firstSkuNeeded
+                                ? 'skus'
+                                : page === 'dashboard'
+                                  ? 'exports'
+                                  : (page as Kind),
+                            )
+                          }
                         >
                           <Plus size={16} />
-                          新增记录
+                          {firstSkuNeeded ? '先建立 SKU 档案' : '新增记录'}
                         </button>
                         {empty && Object.values(state.records).every((rs) => rs.length === 0) && (
                           <button
@@ -999,19 +1240,19 @@ function App() {
                   <div>
                     <button
                       className="icon-button"
-                      disabled={pageNo === 1}
-                      onClick={() => setPageNo(pageNo - 1)}
+                      disabled={currentPage === 1}
+                      onClick={() => setPageNo(currentPage - 1)}
                       aria-label="上一页"
                     >
                       <ChevronLeft size={16} />
                     </button>
                     <span>
-                      {pageNo} / {Math.max(1, Math.ceil(filtered.length / 10))}
+                      {currentPage} / {pageCount}
                     </span>
                     <button
                       className="icon-button"
-                      disabled={pageNo >= Math.ceil(filtered.length / 10)}
-                      onClick={() => setPageNo(pageNo + 1)}
+                      disabled={currentPage >= pageCount}
+                      onClick={() => setPageNo(currentPage + 1)}
                       aria-label="下一页"
                     >
                       <ChevronRight size={16} />
@@ -1114,9 +1355,21 @@ function App() {
               )}
             </div>
           )}
-          {page === 'settings' && <SettingsPanel state={state} onChanged={changed} />}
-          {page === 'team' && <TeamPanel onChanged={changed} state={state} />}
-          {page === 'audit' && <AuditPanel revision={state.revision} />}
+          {owner && page === 'settings' && (
+            <SettingsPanel
+              key={state.user.tenant_id}
+              state={state}
+              onChanged={changed}
+              onDirtyChange={setPageDirty}
+              onBusyChange={setPageBusy}
+            />
+          )}
+          {owner && page === 'team' && (
+            <TeamPanel key={state.user.tenant_id} onChanged={changed} state={state} />
+          )}
+          {owner && page === 'audit' && (
+            <AuditPanel key={state.user.tenant_id} revision={state.revision} />
+          )}
           <footer className="page-footer">
             <span>
               <span className="footer-logo">9810</span> 出口海外仓核销工作空间

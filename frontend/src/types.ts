@@ -48,14 +48,41 @@ export const roles: Record<string, string> = {
   editor: '编辑成员',
   viewer: '只读成员',
 };
-export async function api<T = any>(path: string, method = 'GET', body?: unknown): Promise<T> {
+const workspaceStorageKey = '9810-active-workspace';
+let activeWorkspace: string | null = null;
+try {
+  activeWorkspace = sessionStorage.getItem(workspaceStorageKey);
+} catch {}
+export function getWorkspaceId() {
+  return activeWorkspace;
+}
+export function setWorkspaceId(id: string | null) {
+  activeWorkspace = id;
+  try {
+    if (id) sessionStorage.setItem(workspaceStorageKey, id);
+    else sessionStorage.removeItem(workspaceStorageKey);
+  } catch {}
+}
+export function downloadUrl(path: string, workspaceId = activeWorkspace) {
+  const url = new URL('/api' + path, location.origin);
+  if (workspaceId) url.searchParams.set('workspace_id', workspaceId);
+  return url.pathname + url.search;
+}
+export async function api<T = any>(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  options: { workspaceId?: string | null; signal?: AbortSignal } = {},
+): Promise<T> {
+  const workspaceId = options.workspaceId === undefined ? activeWorkspace : options.workspaceId;
+  const headers: Record<string, string> = { 'X-Requested-With': '9810' };
+  if (!(body instanceof FormData)) headers['Content-Type'] = 'application/json';
+  if (workspaceId) headers['X-Workspace-ID'] = workspaceId;
   const response = await fetch('/api' + path, {
     method,
     credentials: 'same-origin',
-    headers:
-      body instanceof FormData
-        ? { 'X-Requested-With': '9810' }
-        : { 'Content-Type': 'application/json', 'X-Requested-With': '9810' },
+    headers,
+    signal: options.signal,
     body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
   });
   if (!response.ok) {
@@ -104,7 +131,12 @@ export function tone(v: any): string {
 }
 export function display(v: any, field?: Field) {
   if (v === null || v === undefined || v === '') return '—';
-  if (field?.key === 'tax_rate') return (Number(v) * 100).toFixed(0) + '%';
+  if (field?.key === 'tax_rate')
+    return new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits: 6 }).format(
+      Number(v),
+    );
+  if (field?.key === 'exchange_rate')
+    return Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 8 });
   if (field?.type === 'number' || field?.type === 'integer') return num(v);
   return String(v);
 }

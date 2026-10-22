@@ -14,7 +14,7 @@
   --green: #136d58;
   --dark: #173c32;
   --border: #e6ebe9;
-  --muted: #81908a;
+  --muted: #566c60;
   --red: #c55046;
   --amber: #a97327;
 }
@@ -87,7 +87,8 @@ textarea {
 }
 input::placeholder,
 textarea::placeholder {
-  color: #9aa69f;
+  color: #566c60;
+  opacity: 1;
 }
 input:focus,
 select:focus,
@@ -2813,5 +2814,146 @@ td {
   }
   .workflow-step {
     min-width: 135px;
+  }
+}
+/* Keep focus visible on visually hidden file controls and financial secondary text. */
+.dropzone:focus-within,
+.upload-attachment:focus-within {
+  outline: 3px solid #136d58;
+  outline-offset: 3px;
+}
+/* Business text uses a shared dark green on the existing pale surfaces.
+   Keep decorative icons, borders and disabled controls at their original tones. */
+.sidebar nav button,
+td,
+.attention-item strong,
+.logo strong span,
+.workspace-switch small,
+.nav-order,
+.storage-note,
+.user-card small,
+.breadcrumb,
+.topbar-right,
+.today,
+.eyebrow,
+.live-tag,
+.stat-top,
+.stat-number > span,
+.stat-bottom,
+.stat-bottom select,
+.workflow-title > span:last-child,
+.workflow-step strong span,
+.workflow-step small,
+.nav-label,
+.panel-heading p,
+.page-heading p,
+.tabs button,
+.filters select,
+.table-hint,
+.secondary-cell,
+.sub-line,
+.progress-label small,
+.table-footer,
+.table-footer > div > span,
+.attention-item p,
+.attention-foot,
+.currency-tag,
+.receipt-panel > p,
+.receipt-legend,
+.receipt-legend strong,
+.receipt-pending,
+.receipt-pending strong,
+.quiet-note,
+.empty-state,
+.all-good strong,
+.all-good span,
+.page-footer,
+.footer-logo,
+.modal-head p,
+label small,
+.inline-info,
+.computed-details summary,
+.computed-grid small,
+.attachment-section h3,
+.attachment-list small,
+.import-steps,
+.dropzone strong,
+.dropzone > span,
+.import-preview h3,
+.import-counts > div,
+.import-counts strong,
+.import-preview > p,
+.fifo-preview h3,
+.settings-section > div > p,
+.member-row p,
+.you-tag,
+.audit-row p,
+.audit-row time,
+.audit-row summary,
+.audit-change small,
+.audit-change pre,
+.detail-product p,
+.detail-stats small,
+.detail-stats strong,
+.detail-dates > div,
+.detail-dates strong,
+.section-title,
+.related-section > div,
+.related-row,
+.related-row > span:last-child,
+.story-content .eyebrow,
+.story-content > p,
+.story-flow > div,
+.story-note,
+.story-footer,
+.small-brand,
+.auth-form > p,
+.auth-form label,
+.auth-toggle,
+.auth-fine,
+.muted,
+th {
+  color: var(--muted);
+}
+.count-tag,
+.badge.neutral {
+  color: #4f6658;
+}
+.avatar {
+  color: #526a40;
+}
+.nav-count {
+  color: #28674d;
+}
+.panel-link,
+.download-template,
+.import-steps .current,
+.invitation-banner,
+.auth-toggle button {
+  color: var(--green);
+}
+.badge.success {
+  color: #1f6b4f;
+}
+.badge.warning,
+.count-tag.amber,
+.tabs button span,
+.diff,
+.sample-note,
+.detail-alerts > div {
+  color: #885d16;
+}
+.danger-text,
+label em,
+.delete-confirm,
+.delete-confirm p {
+  color: #a7463b;
+}
+@media (max-width: 760px) {
+  .sidebar:not(.visible) {
+    visibility: hidden;
+  }
+  .sidebar.visible {
+    visibility: visible;
   }
 }

@@ -9,3 +9,11 @@ frontend/dist
 frontend/*.tsbuildinfo
 docs/screenshots
 test-results
+
+**/node_modules
+sites/dist
+sites/frontend/dist
+sites/outputs
+sites/.wrangler
+sites/server/assets.json
+docs/review-screenshots

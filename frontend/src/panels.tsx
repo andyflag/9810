@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus,
   Upload,
@@ -18,7 +18,7 @@ import {
   Layers3,
 } from 'lucide-react';
 import { Modal, Badge } from './main';
-import { api, labels, roles, display, num, cnToday } from './types';
+import { api, labels, roles, display, num, cnToday, downloadUrl } from './types';
 import type { State, Kind, Row, Field } from './types';
 type Changed = (message?: string) => Promise<void>;
 const defaultValues: Partial<Record<Kind, Row>> = {
@@ -36,6 +36,21 @@ const defaultValues: Partial<Record<Kind, Row>> = {
   exceptions: { tax_adjustment: '待处理' },
   documents: { storage_type: '数字化' },
 };
+function useDraftClose(dirty: boolean, busy: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!dirty) return;
+    const handle = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handle);
+    return () => window.removeEventListener('beforeunload', handle);
+  }, [dirty]);
+  return () => {
+    if (busy) return;
+    if (!dirty || window.confirm('还有未保存的修改，确定关闭并放弃修改？')) onClose();
+  };
+}
 function ErrorBox({ message }: { message: string }) {
   return message ? (
     <div className="error" role="alert">
@@ -68,6 +83,13 @@ export function RecordEditor({
     [confirmDelete, setConfirmDelete] = useState(false);
   const editable = state.user.role !== 'viewer',
     spec = state.schema[kind];
+  const originalValues = useRef(values);
+  const dirty =
+    editable &&
+    spec.fields
+      .filter((f) => !f.computed)
+      .some((f) => String(values[f.key] ?? '') !== String(originalValues.current[f.key] ?? ''));
+  const close = useDraftClose(dirty, busy, onClose);
   const update = (key: string, value: any) => {
     setValues((v) => ({ ...v, [key]: value }));
     setError('');
@@ -183,7 +205,8 @@ export function RecordEditor({
       title={(editable ? (row ? '编辑' : '新增') : '查看') + labels[kind]}
       subtitle={row ? '记录关联数据将在保存后重新核算' : '白色字段手动填写，关联信息由系统计算'}
       wide
-      onClose={() => !busy && onClose()}
+      busy={busy}
+      onClose={close}
     >
       <form onSubmit={save}>
         <div className="form-body">
@@ -251,7 +274,7 @@ export function RecordEditor({
                       .filter((f) => f.record_id === row.id)
                       .map((f) => (
                         <div key={f.id}>
-                          <a href={'/api/files/' + f.id}>
+                          <a href={downloadUrl('/files/' + f.id, state.user.tenant_id)}>
                             <Paperclip size={15} />
                             {f.name}
                             <small>{num(f.size / 1024)} KB</small>
@@ -323,7 +346,7 @@ export function RecordEditor({
             </button>
           )}
           <div className="spacer" />
-          <button type="button" disabled={busy} onClick={onClose}>
+          <button type="button" disabled={busy} onClick={close}>
             {editable ? '取消' : '关闭'}
           </button>
           {editable && (
@@ -375,6 +398,7 @@ export function ImportDialog({
     <Modal
       title="导入 Excel 台账"
       subtitle="兼容原始模板与本应用导出的工作簿"
+      busy={busy}
       onClose={() => !busy && onClose()}
     >
       <div className="form-body">
@@ -402,7 +426,7 @@ export function ImportDialog({
             }}
           />
         </label>
-        <a href="/api/template" className="download-template">
+        <a href={downloadUrl('/template', state.user.tenant_id)} className="download-template">
           <ArrowDownToLine size={15} />
           下载原始台账模板（含示例）
         </a>
@@ -478,6 +502,11 @@ export function FifoDialog({
     [preview, setPreview] = useState<Row | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const originalValues = useRef(values);
+  const dirty = Object.keys(values).some(
+    (key) => String(values[key] ?? '') !== String(originalValues.current[key] ?? ''),
+  );
+  const close = useDraftClose(dirty, busy, onClose);
   function change(key: string, value: string) {
     setValues({ ...values, [key]: value });
     setPreview(null);
@@ -511,8 +540,9 @@ export function FifoDialog({
     <Modal
       title="FIFO 销量分配"
       subtitle="按出口日期，从最早的可用库存开始分配"
+      busy={busy}
       wide
-      onClose={() => !busy && onClose()}
+      onClose={close}
     >
       <form onSubmit={run}>
         <div className="form-body">
@@ -525,7 +555,12 @@ export function FifoDialog({
           <div className="form-grid">
             <label>
               SKU *
-              <select required value={values.sku} onChange={(e) => change('sku', e.target.value)}>
+              <select
+                disabled={busy}
+                required
+                value={values.sku}
+                onChange={(e) => change('sku', e.target.value)}
+              >
                 <option value="">选择商品</option>
                 {state.records.skus.map((r) => (
                   <option key={r.sku}>{r.sku}</option>
@@ -535,6 +570,7 @@ export function FifoDialog({
             <label>
               结算报告 *
               <select
+                disabled={busy}
                 required
                 value={values.settlement_id}
                 onChange={(e) => change('settlement_id', e.target.value)}
@@ -557,6 +593,7 @@ export function FifoDialog({
                 {l}
                 {k !== 'evidence_date' ? ' *' : ''}
                 <input
+                  disabled={busy}
                   type={t}
                   step={k === 'quantity' ? '1' : 'any'}
                   min={k === 'quantity' ? 1 : undefined}
@@ -595,7 +632,7 @@ export function FifoDialog({
           <ErrorBox message={error} />
         </div>
         <div className="modal-footer">
-          <button type="button" onClick={onClose} disabled={busy}>
+          <button type="button" onClick={close} disabled={busy}>
             取消
           </button>
           <button className="primary" disabled={busy}>
@@ -608,13 +645,30 @@ export function FifoDialog({
     </Modal>
   );
 }
-export function SettingsPanel({ state, onChanged }: { state: State; onChanged: Changed }) {
+export function SettingsPanel({
+  state,
+  onChanged,
+  onDirtyChange,
+  onBusyChange,
+}: {
+  state: State;
+  onChanged: Changed;
+  onDirtyChange: (dirty: boolean) => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const [values, setValues] = useState({ ...state.settings }),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   useEffect(() => {
     setValues({ ...state.settings });
   }, [state.settings]);
+  const dirty = Object.keys(state.settings).some(
+    (key) => String(values[key] ?? '') !== String(state.settings[key] ?? ''),
+  );
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -628,6 +682,10 @@ export function SettingsPanel({ state, onChanged }: { state: State; onChanged: C
       setBusy(false);
     }
   }
+  useEffect(() => {
+    onBusyChange(busy);
+    return () => onBusyChange(false);
+  }, [busy, onBusyChange]);
   const groups = [
     {
       title: '企业基本信息',
@@ -666,6 +724,7 @@ export function SettingsPanel({ state, onChanged }: { state: State; onChanged: C
                 {l}
                 {t === 'select' ? (
                   <select
+                    disabled={busy}
                     value={values[k]}
                     onChange={(e) => setValues({ ...values, [k]: e.target.value })}
                   >
@@ -674,6 +733,7 @@ export function SettingsPanel({ state, onChanged }: { state: State; onChanged: C
                   </select>
                 ) : (
                   <input
+                    disabled={busy}
                     type={t}
                     required={k === 'company_name' || t === 'number'}
                     min={t === 'number' ? 1 : undefined}
@@ -716,12 +776,28 @@ export function TeamPanel({ state, onChanged }: { state: State; onChanged: Chang
     [link, setLink] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [copied, setCopied] = useState(false);
+    [copied, setCopied] = useState(false),
+    [loading, setLoading] = useState(true);
   useEffect(() => {
-    api('/team')
-      .then(setMembers)
-      .catch((e) => setError(e.message));
-  }, [state.revision]);
+    const controller = new AbortController();
+    setLoading(true);
+    setError('');
+    setMembers([]);
+    api<Row[]>('/team', 'GET', undefined, {
+      workspaceId: state.user.tenant_id,
+      signal: controller.signal,
+    })
+      .then((rows) => {
+        if (!controller.signal.aborted) setMembers(rows);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [state.revision, state.user.tenant_id]);
   async function invite(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -759,7 +835,12 @@ export function TeamPanel({ state, onChanged }: { state: State; onChanged: Chang
           </h2>
           <Users size={19} />
         </div>
-        <div className="members-list">
+        <div className="members-list" aria-busy={loading}>
+          {loading && (
+            <div className="empty-state compact">
+              <Loader2 className="spin" aria-label="正在读取成员" />
+            </div>
+          )}
           {members.map((r) => (
             <div key={r.id} className="member-row">
               <span className="avatar">{r.name.slice(0, 1)}</span>
@@ -794,6 +875,7 @@ export function TeamPanel({ state, onChanged }: { state: State; onChanged: Chang
           <label>
             受邀邮箱
             <input
+              disabled={busy}
               type="email"
               required
               placeholder="colleague@company.com"
@@ -803,7 +885,7 @@ export function TeamPanel({ state, onChanged }: { state: State; onChanged: Chang
           </label>
           <label>
             访问权限
-            <select value={role} onChange={(e) => setRole(e.target.value)}>
+            <select disabled={busy} value={role} onChange={(e) => setRole(e.target.value)}>
               <option value="editor">编辑成员 · 管理业务台账</option>
               <option value="viewer">只读成员 · 查看与导出</option>
             </select>
@@ -848,11 +930,21 @@ export function AuditPanel({ revision }: { revision: number }) {
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true);
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
-    api('/audit')
-      .then(setRows)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    setError('');
+    setRows([]);
+    api<Row[]>('/audit', 'GET', undefined, { signal: controller.signal })
+      .then((rows) => {
+        if (!controller.signal.aborted) setRows(rows);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
   }, [revision]);
   return (
     <section className="panel">
