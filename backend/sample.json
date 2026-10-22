@@ -1,0 +1,211 @@
+{
+  "skus": [
+    {
+      "sku": "DEMO-A01",
+      "fnsku": "X00DEMOA01",
+      "asin": "B0DEMOA001",
+      "name": "示例商品A",
+      "customs_name": "示例申报品名A",
+      "hs_code": "按实际填写",
+      "unit": "个",
+      "tax_rate": 0.13,
+      "notes": "示例"
+    },
+    {
+      "sku": "DEMO-B02",
+      "fnsku": "X00DEMOB02",
+      "asin": "B0DEMOB002",
+      "name": "示例商品B",
+      "customs_name": "示例申报品名B",
+      "hs_code": "按实际填写",
+      "unit": "个",
+      "tax_rate": 0.13,
+      "notes": "示例"
+    }
+  ],
+  "exports": [
+    {
+      "declaration_no": "530120260000000001",
+      "item_no": 1,
+      "export_date": "2026-03-10",
+      "trade_mode": "9810",
+      "shipment_id": "FBA19DEMO001",
+      "site": "美国US",
+      "warehouse": "ONT8",
+      "sku": "DEMO-A01",
+      "quantity": 1000,
+      "currency": "USD",
+      "fob": 6000,
+      "exchange_rate": 7.1,
+      "invoice_no": "示例发票001",
+      "invoice_amount": 36000,
+      "forwarder": "示例货代",
+      "waybill": "示例提单001",
+      "received_qty": 996,
+      "received_date": "2026-04-20",
+      "discrepancy_notes": "4件已提交入仓索赔",
+      "notes": "示例"
+    },
+    {
+      "declaration_no": "530120260000000001",
+      "item_no": 2,
+      "export_date": "2026-03-10",
+      "trade_mode": "9810",
+      "shipment_id": "FBA19DEMO001",
+      "site": "美国US",
+      "warehouse": "ONT8",
+      "sku": "DEMO-B02",
+      "quantity": 500,
+      "currency": "USD",
+      "fob": 4000,
+      "exchange_rate": 7.1,
+      "invoice_no": "示例发票002",
+      "invoice_amount": 22000,
+      "forwarder": "示例货代",
+      "waybill": "示例提单001",
+      "received_qty": 500,
+      "received_date": "2026-04-20",
+      "notes": "示例"
+    }
+  ],
+  "sales": [
+    {
+      "month": "2026-05-01",
+      "settlement_id": "示例结算001",
+      "site": "美国US",
+      "sku": "DEMO-A01",
+      "ledger_id": "530120260000000001-1",
+      "sold_qty": 300,
+      "returned_qty": 10,
+      "gross": 8997,
+      "fees": 3600,
+      "sale_date": "2026-05-31",
+      "evidence_date": "2026-06-10",
+      "notes": "示例"
+    },
+    {
+      "month": "2026-05-01",
+      "settlement_id": "示例结算001",
+      "site": "美国US",
+      "sku": "DEMO-B02",
+      "ledger_id": "530120260000000001-2",
+      "sold_qty": 200,
+      "returned_qty": 0,
+      "gross": 7998,
+      "fees": 3200,
+      "sale_date": "2026-05-31",
+      "evidence_date": "2026-06-10",
+      "notes": "示例"
+    },
+    {
+      "month": "2026-06-01",
+      "settlement_id": "示例结算002",
+      "site": "美国US",
+      "sku": "DEMO-A01",
+      "ledger_id": "530120260000000001-1",
+      "sold_qty": 400,
+      "returned_qty": 5,
+      "gross": 11996,
+      "fees": 4800,
+      "sale_date": "2026-06-30",
+      "evidence_date": "2026-07-20",
+      "notes": "示例：佐证留存超期"
+    }
+  ],
+  "receipts": [
+    {
+      "settlement_id": "示例结算001",
+      "site": "美国US",
+      "currency": "USD",
+      "period_start": "2026-05-01",
+      "period_end": "2026-05-31",
+      "gross": 16995,
+      "commission": 2549.25,
+      "fulfillment": 3150,
+      "storage": 300,
+      "advertising": 700,
+      "refunds": 0,
+      "other_fees": 100.75,
+      "channel": "派安盈Payoneer",
+      "platform_date": "2026-06-03",
+      "received_date": "2026-06-05",
+      "bank": "示例银行",
+      "received_amount": 10195,
+      "conversion_date": "2026-06-06",
+      "exchange_rate": 7.12,
+      "declaration_note": "是",
+      "voucher": "示例水单001",
+      "notes": "示例"
+    },
+    {
+      "settlement_id": "示例结算002",
+      "site": "美国US",
+      "currency": "USD",
+      "period_start": "2026-06-01",
+      "period_end": "2026-06-30",
+      "gross": 11996,
+      "commission": 1799.4,
+      "fulfillment": 2200,
+      "storage": 250,
+      "advertising": 450,
+      "refunds": 0,
+      "other_fees": 100.6,
+      "channel": "派安盈Payoneer",
+      "platform_date": "2026-07-03",
+      "notes": "示例：尚未提现回境内"
+    }
+  ],
+  "taxes": [
+    {
+      "ledger_id": "530120260000000001-1",
+      "method": "未售-海外仓预退（HWC-YT）",
+      "quantity": 1000,
+      "declaration_date": "2026-03-20",
+      "reference": "示例YT001",
+      "amount": 4680,
+      "completed_date": "2026-03-27",
+      "notes": "示例"
+    },
+    {
+      "ledger_id": "530120260000000001-2",
+      "method": "未售-海外仓预退（HWC-YT）",
+      "quantity": 500,
+      "declaration_date": "2026-03-20",
+      "reference": "示例YT001",
+      "amount": 2860,
+      "completed_date": "2026-03-27",
+      "notes": "示例"
+    }
+  ],
+  "exceptions": [
+    {
+      "event_date": "2026-07-15",
+      "ledger_id": "530120260000000001-1",
+      "type": "买家退货不可售-弃置",
+      "quantity": 3,
+      "amount": 18,
+      "document_no": "示例移除单001",
+      "tax_adjustment": "待处理",
+      "notes": "示例：买家退回不可售，已申请弃置，与财务确认退税处理"
+    }
+  ],
+  "documents": [
+    {
+      "declaration_no": "530120260000000001",
+      "declaration_date": "2026-03-20",
+      "contract": "已留存",
+      "warehouse_proof": "已留存",
+      "transport": "已留存",
+      "freight_invoice": "已留存",
+      "customs_agreement": "已留存",
+      "customs_invoice": "已留存",
+      "input_invoice": "已留存",
+      "sales_evidence": "陆续留存中",
+      "receipt_evidence": "陆续留存中",
+      "storage_type": "数字化",
+      "location": "共享盘/9810台账/2026/530120260000000001",
+      "completed_date": "2026-04-02",
+      "notes": "示例"
+    }
+  ]
+}
