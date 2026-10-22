@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","strict":true,"skipLibCheck":true,"allowImportingTsExtensions":true,"noEmit":true,"resolveJsonModule":true,"esModuleInterop":true,"types":["@cloudflare/workers-types","node"],"lib":["ES2022","DOM"]},"include":["server/**/*.ts","db/**/*.ts","tests/**/*.ts","drizzle.config.ts"]}

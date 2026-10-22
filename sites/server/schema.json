@@ -1,0 +1,1306 @@
+{
+  "skus": {
+    "label": "SKU 档案",
+    "sheet": "参数表",
+    "header_row": 12,
+    "description": "维护商品档案、申报单位与退税率。",
+    "fields": [
+      {
+        "key": "sku",
+        "label": "SKU",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 1
+      },
+      {
+        "key": "fnsku",
+        "label": "FNSKU",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 2
+      },
+      {
+        "key": "asin",
+        "label": "ASIN",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 3
+      },
+      {
+        "key": "name",
+        "label": "中文品名",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 4
+      },
+      {
+        "key": "customs_name",
+        "label": "报关品名",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 5
+      },
+      {
+        "key": "hs_code",
+        "label": "HS编码",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 6
+      },
+      {
+        "key": "unit",
+        "label": "申报单位",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 7
+      },
+      {
+        "key": "tax_rate",
+        "label": "退税率",
+        "type": "number",
+        "computed": false,
+        "required": true,
+        "column": 8,
+        "hint": "用小数填写，例如 13% 填 0.13"
+      },
+      {
+        "key": "notes",
+        "label": "备注",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 9
+      }
+    ]
+  },
+  "exports": {
+    "label": "出口报关",
+    "sheet": "①出口报关",
+    "header_row": 3,
+    "description": "每个报关单项号一行。白底格子手填，浅蓝色格子自动计算。签收数量取自亚马逊货件页面「已收到」数量。",
+    "fields": [
+      {
+        "key": "ledger_id",
+        "label": "核销编号",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 1
+      },
+      {
+        "key": "declaration_no",
+        "label": "报关单号",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 2
+      },
+      {
+        "key": "item_no",
+        "label": "项号",
+        "type": "integer",
+        "computed": false,
+        "required": true,
+        "column": 3
+      },
+      {
+        "key": "export_date",
+        "label": "出口日期",
+        "type": "date",
+        "computed": false,
+        "required": true,
+        "column": 4
+      },
+      {
+        "key": "trade_mode",
+        "label": "监管方式",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 5
+      },
+      {
+        "key": "shipment_id",
+        "label": "FBA货件号（订仓单号）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 6
+      },
+      {
+        "key": "site",
+        "label": "站点",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 7,
+        "options": [
+          "美国US",
+          "加拿大CA",
+          "墨西哥MX",
+          "巴西BR",
+          "英国UK",
+          "德国DE",
+          "法国FR",
+          "意大利IT",
+          "西班牙ES",
+          "荷兰NL",
+          "瑞典SE",
+          "波兰PL",
+          "比利时BE",
+          "日本JP",
+          "澳大利亚AU",
+          "新加坡SG",
+          "阿联酋AE",
+          "沙特SA",
+          "土耳其TR",
+          "印度IN"
+        ]
+      },
+      {
+        "key": "warehouse",
+        "label": "目的仓代码",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 8
+      },
+      {
+        "key": "sku",
+        "label": "SKU",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 9
+      },
+      {
+        "key": "name",
+        "label": "品名",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 10
+      },
+      {
+        "key": "hs_code",
+        "label": "HS编码",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 11
+      },
+      {
+        "key": "quantity",
+        "label": "报关数量",
+        "type": "integer",
+        "computed": false,
+        "required": true,
+        "column": 12
+      },
+      {
+        "key": "unit",
+        "label": "单位",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 13
+      },
+      {
+        "key": "currency",
+        "label": "币种",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 14,
+        "options": [
+          "USD",
+          "CAD",
+          "MXN",
+          "BRL",
+          "GBP",
+          "EUR",
+          "SEK",
+          "PLN",
+          "JPY",
+          "AUD",
+          "SGD",
+          "AED",
+          "SAR",
+          "TRY",
+          "INR"
+        ]
+      },
+      {
+        "key": "fob",
+        "label": "FOB总价（原币）",
+        "type": "number",
+        "computed": false,
+        "required": true,
+        "column": 15
+      },
+      {
+        "key": "exchange_rate",
+        "label": "报关汇率",
+        "type": "number",
+        "computed": false,
+        "required": true,
+        "column": 16,
+        "hint": "1 单位原币对应人民币金额"
+      },
+      {
+        "key": "fob_cny",
+        "label": "FOB总价（元）",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 17
+      },
+      {
+        "key": "invoice_no",
+        "label": "进项发票号码",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 18
+      },
+      {
+        "key": "invoice_amount",
+        "label": "进项发票不含税金额（元）",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 19
+      },
+      {
+        "key": "tax_rate",
+        "label": "退税率",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 20,
+        "hint": "用小数填写，例如 13% 填 0.13"
+      },
+      {
+        "key": "tax_basis",
+        "label": "退税计税依据（元）",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 21
+      },
+      {
+        "key": "expected_tax",
+        "label": "预计退税额（元）",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 22
+      },
+      {
+        "key": "forwarder",
+        "label": "头程物流商",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 23
+      },
+      {
+        "key": "waybill",
+        "label": "提单/运单号",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 24
+      },
+      {
+        "key": "received_qty",
+        "label": "亚马逊签收数量",
+        "type": "integer",
+        "computed": false,
+        "required": false,
+        "column": 25
+      },
+      {
+        "key": "received_date",
+        "label": "签收完成日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 26
+      },
+      {
+        "key": "warehouse_difference",
+        "label": "入仓差异",
+        "type": "integer",
+        "computed": true,
+        "required": false,
+        "column": 27
+      },
+      {
+        "key": "discrepancy_notes",
+        "label": "差异处理（索赔/补发/说明）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 28
+      },
+      {
+        "key": "notes",
+        "label": "备注",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 29
+      }
+    ]
+  },
+  "sales": {
+    "label": "销售核销",
+    "sheet": "②销售核销",
+    "header_row": 3,
+    "description": "按结算报告每月填写：一个月 × 一个SKU × 一个核销编号 一行。同一SKU有多票报关单时，先分配给出口日期最早的那票（先进先出），卖完再分下一票。",
+    "fields": [
+      {
+        "key": "month",
+        "label": "销售月份",
+        "type": "date",
+        "computed": false,
+        "required": true,
+        "column": 1
+      },
+      {
+        "key": "settlement_id",
+        "label": "结算报告编号（Settlement ID）",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 2
+      },
+      {
+        "key": "site",
+        "label": "站点",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 3,
+        "options": [
+          "美国US",
+          "加拿大CA",
+          "墨西哥MX",
+          "巴西BR",
+          "英国UK",
+          "德国DE",
+          "法国FR",
+          "意大利IT",
+          "西班牙ES",
+          "荷兰NL",
+          "瑞典SE",
+          "波兰PL",
+          "比利时BE",
+          "日本JP",
+          "澳大利亚AU",
+          "新加坡SG",
+          "阿联酋AE",
+          "沙特SA",
+          "土耳其TR",
+          "印度IN"
+        ]
+      },
+      {
+        "key": "sku",
+        "label": "SKU",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 4
+      },
+      {
+        "key": "ledger_id",
+        "label": "归属核销编号",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 5
+      },
+      {
+        "key": "sku_check",
+        "label": "SKU核对",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 6
+      },
+      {
+        "key": "sold_qty",
+        "label": "售出数量",
+        "type": "integer",
+        "computed": false,
+        "required": true,
+        "column": 7
+      },
+      {
+        "key": "returned_qty",
+        "label": "买家退货数量（回到可售）",
+        "type": "integer",
+        "computed": false,
+        "required": false,
+        "column": 8
+      },
+      {
+        "key": "net_qty",
+        "label": "净售出数量",
+        "type": "integer",
+        "computed": true,
+        "required": false,
+        "column": 9
+      },
+      {
+        "key": "gross",
+        "label": "商品销售额（原币）",
+        "type": "number",
+        "computed": false,
+        "required": true,
+        "column": 10
+      },
+      {
+        "key": "fees",
+        "label": "平台扣费分摊（原币）",
+        "type": "number",
+        "computed": false,
+        "required": true,
+        "column": 11
+      },
+      {
+        "key": "net_amount",
+        "label": "净回款（原币）",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 12
+      },
+      {
+        "key": "receipt_status",
+        "label": "收汇状态",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 13
+      },
+      {
+        "key": "sale_date",
+        "label": "实现销售日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 14
+      },
+      {
+        "key": "evidence_date",
+        "label": "销售佐证留存日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 15
+      },
+      {
+        "key": "evidence_status",
+        "label": "佐证留存",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 16
+      },
+      {
+        "key": "notes",
+        "label": "备注",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 17
+      }
+    ]
+  },
+  "receipts": {
+    "label": "回款收汇",
+    "sheet": "③回款收汇",
+    "header_row": 3,
+    "description": "毛额、各项扣费、净额分开记，方便按毛额还原。结算净额需全部分配到「②销售核销」，分摊差异为 0 才算分完；收汇以资金进入境内银行账户为准。",
+    "fields": [
+      {
+        "key": "settlement_id",
+        "label": "结算报告编号（Settlement ID）",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 1
+      },
+      {
+        "key": "site",
+        "label": "站点",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 2,
+        "options": [
+          "美国US",
+          "加拿大CA",
+          "墨西哥MX",
+          "巴西BR",
+          "英国UK",
+          "德国DE",
+          "法国FR",
+          "意大利IT",
+          "西班牙ES",
+          "荷兰NL",
+          "瑞典SE",
+          "波兰PL",
+          "比利时BE",
+          "日本JP",
+          "澳大利亚AU",
+          "新加坡SG",
+          "阿联酋AE",
+          "沙特SA",
+          "土耳其TR",
+          "印度IN"
+        ]
+      },
+      {
+        "key": "currency",
+        "label": "币种",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 3,
+        "options": [
+          "USD",
+          "CAD",
+          "MXN",
+          "BRL",
+          "GBP",
+          "EUR",
+          "SEK",
+          "PLN",
+          "JPY",
+          "AUD",
+          "SGD",
+          "AED",
+          "SAR",
+          "TRY",
+          "INR"
+        ]
+      },
+      {
+        "key": "period_start",
+        "label": "结算期间（起）",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 4
+      },
+      {
+        "key": "period_end",
+        "label": "结算期间（止）",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 5
+      },
+      {
+        "key": "gross",
+        "label": "商品销售额",
+        "type": "number",
+        "computed": false,
+        "required": true,
+        "column": 6
+      },
+      {
+        "key": "commission",
+        "label": "平台佣金",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 7
+      },
+      {
+        "key": "fulfillment",
+        "label": "FBA配送费",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 8
+      },
+      {
+        "key": "storage",
+        "label": "仓储费",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 9
+      },
+      {
+        "key": "advertising",
+        "label": "广告费",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 10
+      },
+      {
+        "key": "refunds",
+        "label": "退款",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 11
+      },
+      {
+        "key": "other_fees",
+        "label": "其他扣费",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 12
+      },
+      {
+        "key": "net_amount",
+        "label": "结算净额",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 13
+      },
+      {
+        "key": "allocated",
+        "label": "已分摊到报关单",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 14
+      },
+      {
+        "key": "allocation_difference",
+        "label": "分摊差异",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 15
+      },
+      {
+        "key": "channel",
+        "label": "收款渠道",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 16,
+        "options": [
+          "银行直接收款",
+          "派安盈Payoneer",
+          "万里汇WorldFirst",
+          "连连支付",
+          "PingPong",
+          "空中云汇Airwallex",
+          "其他"
+        ]
+      },
+      {
+        "key": "platform_date",
+        "label": "到达收款账户日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 17
+      },
+      {
+        "key": "received_date",
+        "label": "收汇入境日期（境内银行入账）",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 18
+      },
+      {
+        "key": "bank",
+        "label": "境内入账银行",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 19
+      },
+      {
+        "key": "received_amount",
+        "label": "入境金额（原币）",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 20
+      },
+      {
+        "key": "conversion_date",
+        "label": "结汇日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 21
+      },
+      {
+        "key": "exchange_rate",
+        "label": "结汇汇率",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 22,
+        "hint": "1 单位原币对应人民币金额"
+      },
+      {
+        "key": "converted_amount",
+        "label": "结汇金额（元）",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 23
+      },
+      {
+        "key": "declaration_note",
+        "label": "申报附言注明\"跨境电商\"",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 24,
+        "options": [
+          "是",
+          "否"
+        ]
+      },
+      {
+        "key": "voucher",
+        "label": "收汇凭证/水单号",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 25
+      },
+      {
+        "key": "notes",
+        "label": "备注",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 26
+      }
+    ]
+  },
+  "taxes": {
+    "label": "退税核算",
+    "sheet": "④退税核算",
+    "header_row": 3,
+    "description": "每次退税申报一行。未售货物申报预退税（HWC-YT）后，须在核算期末前按实际销售核算；到期不核算，税务机关会追回已退税款。",
+    "fields": [
+      {
+        "key": "ledger_id",
+        "label": "核销编号",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 1
+      },
+      {
+        "key": "sku",
+        "label": "SKU",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 2
+      },
+      {
+        "key": "export_date",
+        "label": "出口日期",
+        "type": "date",
+        "computed": true,
+        "required": false,
+        "column": 3
+      },
+      {
+        "key": "method",
+        "label": "申报方式",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 4,
+        "options": [
+          "已售-按现行规定申报",
+          "未售-海外仓预退（HWC-YT）"
+        ]
+      },
+      {
+        "key": "quantity",
+        "label": "申报数量",
+        "type": "integer",
+        "computed": false,
+        "required": true,
+        "column": 5
+      },
+      {
+        "key": "declaration_date",
+        "label": "申报日期",
+        "type": "date",
+        "computed": false,
+        "required": true,
+        "column": 6
+      },
+      {
+        "key": "reference",
+        "label": "申报序号/关联号",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 7
+      },
+      {
+        "key": "amount",
+        "label": "申报退税额（元）",
+        "type": "number",
+        "computed": false,
+        "required": true,
+        "column": 8
+      },
+      {
+        "key": "completed_date",
+        "label": "税务办结日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 9
+      },
+      {
+        "key": "deadline",
+        "label": "核算期末",
+        "type": "date",
+        "computed": true,
+        "required": false,
+        "column": 10
+      },
+      {
+        "key": "days_left",
+        "label": "剩余天数",
+        "type": "integer",
+        "computed": true,
+        "required": false,
+        "column": 11
+      },
+      {
+        "key": "sold_qty",
+        "label": "预退部分已实现销售数量",
+        "type": "integer",
+        "computed": true,
+        "required": false,
+        "column": 12
+      },
+      {
+        "key": "reference_amount",
+        "label": "参考应退税额（元）",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 13
+      },
+      {
+        "key": "actual_amount",
+        "label": "实际应退税额（元）",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 14
+      },
+      {
+        "key": "difference",
+        "label": "差额（元）",
+        "type": "number",
+        "computed": true,
+        "required": false,
+        "column": 15
+      },
+      {
+        "key": "action",
+        "label": "若现在核算应如何处理",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 16
+      },
+      {
+        "key": "reconciled_date",
+        "label": "核算办理日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 17
+      },
+      {
+        "key": "result",
+        "label": "核算结果",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 18,
+        "options": [
+          "无需调整申报",
+          "需要调整申报",
+          "全额缴回预退税"
+        ]
+      },
+      {
+        "key": "status",
+        "label": "状态",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 19
+      },
+      {
+        "key": "receipt_deadline",
+        "label": "收汇截止日",
+        "type": "date",
+        "computed": true,
+        "required": false,
+        "column": 20
+      },
+      {
+        "key": "notes",
+        "label": "备注",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 21
+      },
+      {
+        "key": "deadline_override",
+        "label": "核算截止日调整",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 22,
+        "hint": "生产企业可按实际增值税申报截止日填写；否则采用参数规则。"
+      }
+    ]
+  },
+  "exceptions": {
+    "label": "库存异常",
+    "sheet": "⑤库存异常",
+    "header_row": 3,
+    "description": "买家退货回到可售库存不在这里记（记在「②销售核销」的退货数量）。入仓签收差异记在「①出口报关」。已退税货物退运或不再适用退税的，发生当月或次月负数冲减。",
+    "fields": [
+      {
+        "key": "event_date",
+        "label": "发生日期",
+        "type": "date",
+        "computed": false,
+        "required": true,
+        "column": 1
+      },
+      {
+        "key": "ledger_id",
+        "label": "核销编号",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 2
+      },
+      {
+        "key": "sku",
+        "label": "SKU",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 3
+      },
+      {
+        "key": "type",
+        "label": "异常类型",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 4,
+        "options": [
+          "仓内丢失或损坏（已获赔偿）",
+          "买家退货不可售-弃置",
+          "移除-弃置销毁",
+          "移除-退运回国",
+          "移除-调往其他仓或站点",
+          "盘点差异",
+          "其他"
+        ]
+      },
+      {
+        "key": "quantity",
+        "label": "数量",
+        "type": "integer",
+        "computed": false,
+        "required": true,
+        "column": 5
+      },
+      {
+        "key": "amount",
+        "label": "金额（原币，赔偿额或货值）",
+        "type": "number",
+        "computed": false,
+        "required": false,
+        "column": 6
+      },
+      {
+        "key": "document_no",
+        "label": "亚马逊单据号（移除订单/赔偿编号）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 7
+      },
+      {
+        "key": "tax_adjustment",
+        "label": "退税冲减状态",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 8,
+        "options": [
+          "已负数冲减",
+          "无需冲减",
+          "待处理"
+        ]
+      },
+      {
+        "key": "notes",
+        "label": "处理说明",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 9
+      }
+    ]
+  },
+  "documents": {
+    "label": "单证留存",
+    "sheet": "⑥单证留存",
+    "header_row": 3,
+    "description": "退税申报后15日内留存备案单证并按申报时间顺序编目录，保存10年。无法取得出口合同的，可用亚马逊订仓单/货件确认等海外仓使用资料替代。",
+    "fields": [
+      {
+        "key": "declaration_no",
+        "label": "报关单号",
+        "type": "text",
+        "computed": false,
+        "required": true,
+        "column": 1
+      },
+      {
+        "key": "declaration_date",
+        "label": "退税申报日期",
+        "type": "date",
+        "computed": false,
+        "required": true,
+        "column": 2
+      },
+      {
+        "key": "deadline",
+        "label": "留存截止日",
+        "type": "date",
+        "computed": true,
+        "required": false,
+        "column": 3
+      },
+      {
+        "key": "contract",
+        "label": "购销合同（或订仓单）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 4,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "warehouse_proof",
+        "label": "海外仓使用证明（FBA货件确认/仓储协议）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 5,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "transport",
+        "label": "运输单据（提单/运单）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 6,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "freight_invoice",
+        "label": "国际货代费用发票",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 7,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "customs_agreement",
+        "label": "委托报关协议",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 8,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "customs_invoice",
+        "label": "代理报关服务费发票",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 9,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "input_invoice",
+        "label": "进项增值税专用发票",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 10,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "sales_evidence",
+        "label": "销售佐证（结算报告/销售明细账）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 11,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "receipt_evidence",
+        "label": "收汇凭证（银行水单/结汇凭证）",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 12,
+        "options": [
+          "已留存",
+          "陆续留存中",
+          "未留存",
+          "不适用"
+        ]
+      },
+      {
+        "key": "storage_type",
+        "label": "存放方式",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 13,
+        "options": [
+          "纸质化",
+          "影像化",
+          "数字化"
+        ]
+      },
+      {
+        "key": "location",
+        "label": "存放位置/文件夹",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 14
+      },
+      {
+        "key": "completed_date",
+        "label": "实际完成留存日期",
+        "type": "date",
+        "computed": false,
+        "required": false,
+        "column": 15
+      },
+      {
+        "key": "completeness",
+        "label": "齐全情况",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 16
+      },
+      {
+        "key": "timeliness",
+        "label": "是否按时",
+        "type": "text",
+        "computed": true,
+        "required": false,
+        "column": 17
+      },
+      {
+        "key": "retention_date",
+        "label": "建议保存至",
+        "type": "date",
+        "computed": true,
+        "required": false,
+        "column": 18
+      },
+      {
+        "key": "notes",
+        "label": "备注",
+        "type": "text",
+        "computed": false,
+        "required": false,
+        "column": 19
+      }
+    ]
+  }
+}

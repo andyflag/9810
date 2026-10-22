@@ -2,6 +2,10 @@
 
 将《亚马逊9810核销台账模板-初版.xlsx》实现为中文 SaaS 应用。以 **报关单号－项号** 为核销主线，连接出口报关、FBA 入仓、销售、回款收汇、退税核算和单证留存。
 
+**线上应用：** [打开 9810](https://ledger-9810.lively-cake-3869.chatgpt.site)。已发布为私有 Sites 站点，使用创建站点的 ChatGPT 账号登录。
+
+Sites 版源码、测试与发布说明见 [sites/README.md](sites/README.md)，使用 Worker、D1 与 R2 持久化数据。下文的 Python/Docker 版仍可独立部署；两个版本不自动同步数据。
+
 ![核销工作台](docs/screenshots/dashboard.png)
 
 ## 已实现
@@ -45,7 +49,7 @@ docker compose up -d --build
 
 正式公网部署需要域名和 HTTPS 反向代理，把 `.env` 中的 `APP_ENV` 改为 `production` 后重建容器。此时会话 Cookie 使用 `Secure`，必须通过 HTTPS 登录。不要删除数据卷；升级前使用下述 SQLite 备份命令。详细说明见 [部署与运维](docs/DEPLOYMENT.md)。
 
-本仓库交付的是可独立部署的应用，未绑定线上域名或云资源。Docker 配置已提供；本次验证采用原生 Python/Node 运行，并未实测容器构建。
+Python 版可独立部署，Sites 版已上线，入口见上方链接。Docker 配置已提供；自托管版验证采用原生 Python/Node 运行，未实测容器构建。
 
 ## 推荐使用顺序
 

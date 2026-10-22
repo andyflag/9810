@@ -25,3 +25,35 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+  sites:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sites
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            sites/package-lock.json
+            sites/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix frontend --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: npm run package
+      - run: npx wrangler d1 migrations apply DB --local --config wrangler.jsonc
+      - name: Verify worker, D1 and R2
+        run: |
+          npx wrangler dev --local --config wrangler.jsonc --ip 127.0.0.1 --port 8787 > "$RUNNER_TEMP/9810-worker.log" 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8787/api/health; then
+              npm run test:integration
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/9810-worker.log"
+          exit 1

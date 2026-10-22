@@ -1,0 +1,12 @@
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+dist/
+.wrangler/
+.sites-runtime/
+outputs/
+.env*
+.dev.vars*
+server/assets.json
+test-results/

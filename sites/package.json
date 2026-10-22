@@ -1,0 +1,30 @@
+{
+  "name": "ledger-9810-sites",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build --prefix frontend && node scripts/build.mjs",
+    "db:generate": "drizzle-kit generate",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "dev": "wrangler dev --local --ip 127.0.0.1 --port 8787",
+    "check": "tsc --noEmit",
+    "test:integration": "node --import tsx tests/worker.integration.ts",
+    "format": "frontend/node_modules/.bin/prettier --write server/*.ts db/*.ts tests/*.ts scripts/*.mjs frontend/src",
+    "package": "npm run build && node scripts/package.mjs"
+  },
+  "dependencies": {
+    "decimal.js": "10.6.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "drizzle-orm": "0.45.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "wrangler": "4.92.0",
+    "drizzle-kit": "0.31.10",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "@cloudflare/workers-types": "4.20260515.1",
+    "@types/node": "22.19.19"
+  }
+}
